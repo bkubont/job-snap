@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ChevronRight,
@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Play,
   ArrowRightLeft,
+  Upload,
 } from "lucide-react";
 import {
   useContacts,
@@ -32,6 +33,10 @@ import {
 } from "@/lib/db";
 import { downloadThisWeekCsv } from "@/lib/export";
 import { formatElapsedLive, formatDay } from "@/lib/time";
+import {
+  contactDedupeKey,
+  parseContactImportFile,
+} from "@/lib/vcard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,11 +87,13 @@ export default function HomePage() {
   const [open, setOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [fileImporting, setFileImporting] = useState(false);
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [csvBusy, setCsvBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [, setTick] = useState(0);
   const [form, setForm] = useState<ContactForm>(emptyForm);
+  const vcfInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPickerOk(canUseContactPicker());
@@ -118,12 +125,15 @@ export default function HomePage() {
     try {
       const picked = await pickPhoneContacts();
       if (!picked.length) return;
-      const existing = new Set(
-        contacts.map((c) => c.name.toLowerCase() + "|" + c.phone),
-      );
+      const existing = new Set(contacts.map(contactDedupeKey));
+      let imported = 0;
+      let skipped = 0;
       for (const p of picked) {
-        const key = p.name.toLowerCase() + "|" + p.phone;
-        if (existing.has(key)) continue;
+        const key = contactDedupeKey(p);
+        if (existing.has(key)) {
+          skipped += 1;
+          continue;
+        }
         await createContact({
           name: p.name,
           phone: p.phone,
@@ -132,16 +142,76 @@ export default function HomePage() {
           notes: "",
         });
         existing.add(key);
+        imported += 1;
       }
       refreshSitefold();
+      alert(
+        imported || skipped
+          ? `Imported ${imported} contact${imported === 1 ? "" : "s"}${
+              skipped ? `, skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}` : ""
+            }.`
+          : "No contacts selected.",
+      );
     } catch (e) {
       alert(
         e instanceof Error
           ? e.message
-          : "Could not open your phone contacts. Try Chrome or Edge on Android, or add a contact manually.",
+          : "Could not open your phone contacts. Try Chrome or Edge on Android, import a .vcf, or add a contact manually.",
       );
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function onImportVcfFile(fileList: FileList | null) {
+    const file = fileList?.[0];
+    if (!file) return;
+    setFileImporting(true);
+    try {
+      const text = await file.text();
+      const { contacts: parsed, kind } = parseContactImportFile(
+        text,
+        file.name,
+        file.type,
+      );
+      if (!parsed.length) {
+        alert(
+          kind === "csv"
+            ? "No contacts found. CSV needs a name column (and optional phone, email, address)."
+            : "No contacts found in that file. Export contacts as .vcf from iOS Contacts, or use a CSV with name/phone/email/address headers.",
+        );
+        return;
+      }
+      const existing = new Set(contacts.map(contactDedupeKey));
+      let imported = 0;
+      let skipped = 0;
+      for (const p of parsed) {
+        const key = contactDedupeKey(p);
+        if (existing.has(key)) {
+          skipped += 1;
+          continue;
+        }
+        await createContact({
+          name: p.name,
+          phone: p.phone,
+          email: p.email,
+          address: p.address,
+          notes: p.notes,
+        });
+        existing.add(key);
+        imported += 1;
+      }
+      refreshSitefold();
+      alert(
+        `Imported ${imported} contact${imported === 1 ? "" : "s"}${
+          skipped ? `, skipped ${skipped} duplicate${skipped === 1 ? "" : "s"}` : ""
+        }.`,
+      );
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not import that file.");
+    } finally {
+      setFileImporting(false);
+      if (vcfInputRef.current) vcfInputRef.current.value = "";
     }
   }
 
@@ -201,6 +271,15 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6">
+      <input
+        ref={vcfInputRef}
+        type="file"
+        accept=".vcf,.csv,text/vcard,text/x-vcard,text/csv"
+        className="sr-only"
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => onImportVcfFile(e.target.files)}
+      />
       {hasContacts ? (
         <section className="flex items-center justify-between gap-3 rounded-2xl bg-[oklch(0.32_0.05_155)] px-4 py-3 text-[oklch(0.97_0.02_95)] shadow-sm">
           <div className="min-w-0">
@@ -226,13 +305,23 @@ export default function HomePage() {
               <Button
                 size="sm"
                 onClick={onImportFromPhone}
-                disabled={importing}
+                disabled={importing || fileImporting}
                 className="bg-[oklch(0.82_0.12_75)] text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
               >
                 <Smartphone className="h-3.5 w-3.5" />
                 {importing ? "…" : "Phone"}
               </Button>
             ) : null}
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={fileImporting || importing}
+              onClick={() => vcfInputRef.current?.click()}
+              className="bg-white/15 text-white hover:bg-white/25"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {fileImporting ? "…" : "Import .vcf"}
+            </Button>
             <Dialog
               open={open}
               onOpenChange={(v) => {
@@ -281,13 +370,26 @@ export default function HomePage() {
             {pickerOk ? (
               <Button
                 onClick={onImportFromPhone}
-                disabled={importing}
+                disabled={importing || fileImporting}
                 className="bg-[oklch(0.82_0.12_75)] text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
               >
                 <Smartphone className="h-4 w-4" />
                 {importing ? "Opening…" : "From phone"}
               </Button>
             ) : null}
+            <Button
+              variant={pickerOk ? "secondary" : "default"}
+              disabled={fileImporting || importing}
+              onClick={() => vcfInputRef.current?.click()}
+              className={
+                pickerOk
+                  ? "bg-white/15 text-white hover:bg-white/25"
+                  : "bg-[oklch(0.82_0.12_75)] text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
+              }
+            >
+              <Upload className="h-4 w-4" />
+              {fileImporting ? "Importing…" : "Import .vcf"}
+            </Button>
             <Dialog
               open={open}
               onOpenChange={(v) => {
@@ -297,12 +399,8 @@ export default function HomePage() {
             >
               <DialogTrigger asChild>
                 <Button
-                  variant={pickerOk ? "secondary" : "default"}
-                  className={
-                    pickerOk
-                      ? "bg-white/15 text-white hover:bg-white/25"
-                      : "bg-[oklch(0.82_0.12_75)] text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
-                  }
+                  variant="secondary"
+                  className="bg-white/15 text-white hover:bg-white/25"
                 >
                   <Plus className="h-4 w-4" />
                   Add contact
@@ -435,7 +533,8 @@ export default function HomePage() {
             <ContactRound className="mx-auto h-8 w-8 text-[oklch(0.45_0.05_155)]" />
             <p className="mt-3 font-medium">No contacts yet</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Import from your phone or add one manually to start a job folder.
+              On iPhone, export contacts as .vcf and import here. On Android, use
+              From phone — or add one manually.
             </p>
           </div>
         ) : filteredContacts.length === 0 ? (
@@ -567,8 +666,8 @@ function ContactCreateForm({
       )}
       {!pickerOk ? (
         <p className="text-xs text-muted-foreground">
-          Phone contact import works best in Chrome or Edge on Android. On other
-          browsers, add contacts here.
+          iPhone Safari can’t use the contact picker — use Import .vcf (or CSV)
+          from the home screen, or add contacts here.
         </p>
       ) : null}
       <Button type="submit" className="w-full">
