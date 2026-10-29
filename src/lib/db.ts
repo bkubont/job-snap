@@ -295,6 +295,13 @@ export async function listPhotosForJob(jobId: string): Promise<Photo[]> {
   );
 }
 
+export async function listAllPhotos(): Promise<Photo[]> {
+  const photos = await (await getDb()).getAll("photos");
+  return photos.sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
 export async function addPhoto(jobId: string, blob: Blob, caption = "") {
   const photo: Photo = {
     id: id(),
