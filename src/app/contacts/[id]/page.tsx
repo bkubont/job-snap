@@ -1,16 +1,19 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRightLeft,
   Briefcase,
+  Check,
   ChevronRight,
+  Pencil,
   Play,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   useContact,
@@ -20,12 +23,14 @@ import {
 import {
   createJob,
   deleteContact,
+  updateContact,
   updateJob,
   switchPunchToJob,
 } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -35,6 +40,14 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { formatDay } from "@/lib/time";
+
+type EditForm = {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+};
 
 export default function ContactPage({
   params,
@@ -49,6 +62,27 @@ export default function ContactPage({
   const [title, setTitle] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const [editForm, setEditForm] = useState<EditForm>({
+    name: "",
+    phone: "",
+    email: "",
+    address: "",
+    notes: "",
+  });
+
+  useEffect(() => {
+    if (!contact || editing) return;
+    setEditForm({
+      name: contact.name,
+      phone: contact.phone,
+      email: contact.email,
+      address: contact.address,
+      notes: contact.notes,
+    });
+  }, [contact, editing]);
 
   if (contact === undefined) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -133,6 +167,58 @@ export default function ContactPage({
     }
   }
 
+  function startEdit() {
+    setEditForm({
+      name: contact!.name,
+      phone: contact!.phone,
+      email: contact!.email,
+      address: contact!.address,
+      notes: contact!.notes,
+    });
+    setEditing(true);
+    setSavedFlash(false);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setEditForm({
+      name: contact!.name,
+      phone: contact!.phone,
+      email: contact!.email,
+      address: contact!.address,
+      notes: contact!.notes,
+    });
+  }
+
+  async function onSaveContact(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editForm.name.trim() || !contact) return;
+    setSaving(true);
+    try {
+      await updateContact({
+        ...contact,
+        name: editForm.name,
+        phone: editForm.phone,
+        email: editForm.email,
+        address: editForm.address,
+        notes: editForm.notes,
+      });
+      refreshSitefold();
+      setEditing(false);
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 2000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not save contact");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const headerSubtitle =
+    [contact.phone, contact.email, contact.address]
+      .filter(Boolean)
+      .join(" · ") || "Contact folder";
+
   return (
     <div className="space-y-5">
       <div className="flex items-start gap-3">
@@ -145,11 +231,20 @@ export default function ContactPage({
           <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
             {contact.name}
           </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {[contact.phone, contact.email].filter(Boolean).join(" · ") ||
-              "Contact folder"}
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">
+            {headerSubtitle}
           </p>
         </div>
+        {!editing ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={startEdit}
+            aria-label="Edit contact"
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           size="icon"
@@ -160,7 +255,103 @@ export default function ContactPage({
         </Button>
       </div>
 
-      {contact.notes ? (
+      {savedFlash ? (
+        <p className="flex items-center gap-1.5 text-sm text-[oklch(0.42_0.08_155)]">
+          <Check className="h-4 w-4" />
+          Contact saved
+        </p>
+      ) : null}
+
+      {editing ? (
+        <form
+          onSubmit={onSaveContact}
+          className="space-y-3 rounded-2xl bg-white/70 px-4 py-4 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-heading text-sm font-semibold">Edit contact</p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={cancelEdit}
+              aria-label="Cancel edit"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-name">Name</Label>
+            <Input
+              id="edit-name"
+              required
+              value={editForm.name}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, name: e.target.value }))
+              }
+              autoFocus
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-phone">Phone</Label>
+            <Input
+              id="edit-phone"
+              type="tel"
+              value={editForm.phone}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, phone: e.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-email">Email</Label>
+            <Input
+              id="edit-email"
+              type="email"
+              value={editForm.email}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, email: e.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-address">Address</Label>
+            <Textarea
+              id="edit-address"
+              value={editForm.address}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, address: e.target.value }))
+              }
+              rows={2}
+              className="min-h-0"
+              placeholder="Optional"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-notes">Notes</Label>
+            <Textarea
+              id="edit-notes"
+              value={editForm.notes}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, notes: e.target.value }))
+              }
+              rows={3}
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button type="submit" className="flex-1" disabled={saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={cancelEdit}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      ) : contact.notes ? (
         <p className="rounded-2xl bg-white/60 px-4 py-3 text-sm leading-relaxed ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
           {contact.notes}
         </p>

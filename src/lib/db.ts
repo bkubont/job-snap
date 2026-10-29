@@ -78,24 +78,41 @@ function now() {
   return new Date().toISOString();
 }
 
+/** Normalize legacy IndexedDB rows that predate optional fields. */
+function normalizeContact(raw: Contact | undefined): Contact | undefined {
+  if (!raw) return undefined;
+  return {
+    ...raw,
+    phone: raw.phone ?? "",
+    email: raw.email ?? "",
+    address: raw.address ?? "",
+    notes: raw.notes ?? "",
+  };
+}
+
 export async function listContacts(): Promise<Contact[]> {
   const db = await getDb();
   const all = await db.getAll("contacts");
-  return all.sort((a, b) => a.name.localeCompare(b.name));
+  return all
+    .map((c) => normalizeContact(c)!)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getContact(contactId: string) {
-  return (await getDb()).get("contacts", contactId);
+  return normalizeContact(await (await getDb()).get("contacts", contactId));
 }
 
 export async function createContact(
-  input: Pick<Contact, "name" | "phone" | "email" | "notes">,
+  input: Pick<Contact, "name" | "phone" | "email" | "notes"> & {
+    address?: string;
+  },
 ) {
   const contact: Contact = {
     id: id(),
     name: input.name.trim(),
     phone: input.phone.trim(),
     email: input.email.trim(),
+    address: (input.address ?? "").trim(),
     notes: input.notes.trim(),
     createdAt: now(),
   };
@@ -104,8 +121,16 @@ export async function createContact(
 }
 
 export async function updateContact(contact: Contact) {
-  await (await getDb()).put("contacts", contact);
-  return contact;
+  const normalized: Contact = {
+    ...contact,
+    name: contact.name.trim(),
+    phone: contact.phone.trim(),
+    email: contact.email.trim(),
+    address: (contact.address ?? "").trim(),
+    notes: contact.notes.trim(),
+  };
+  await (await getDb()).put("contacts", normalized);
+  return normalized;
 }
 
 export async function deleteContact(contactId: string) {

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ChevronRight,
   ContactRound,
   Download,
   Plus,
+  Search,
   Smartphone,
   FolderOpen,
   Play,
@@ -33,6 +34,7 @@ import { formatElapsedLive, formatDay } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +42,33 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+
+type ContactForm = {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+};
+
+const emptyForm: ContactForm = {
+  name: "",
+  phone: "",
+  email: "",
+  address: "",
+  notes: "",
+};
+
+function contactMatchesQuery(
+  c: { name: string; phone: string; email: string; address: string },
+  q: string,
+) {
+  if (!q) return true;
+  const hay = [c.name, c.phone, c.email, c.address]
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(q);
+}
 
 export default function HomePage() {
   const { contacts, loading } = useContacts();
@@ -54,13 +83,9 @@ export default function HomePage() {
   const [importing, setImporting] = useState(false);
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [csvBusy, setCsvBusy] = useState(false);
+  const [query, setQuery] = useState("");
   const [, setTick] = useState(0);
-  const [form, setForm] = useState({
-    name: "",
-    phone: "",
-    email: "",
-    notes: "",
-  });
+  const [form, setForm] = useState<ContactForm>(emptyForm);
 
   useEffect(() => {
     setPickerOk(canUseContactPicker());
@@ -102,6 +127,7 @@ export default function HomePage() {
           name: p.name,
           phone: p.phone,
           email: p.email,
+          address: "",
           notes: "",
         });
         existing.add(key);
@@ -122,7 +148,7 @@ export default function HomePage() {
     e.preventDefault();
     if (!form.name.trim()) return;
     await createContact(form);
-    setForm({ name: "", phone: "", email: "", notes: "" });
+    setForm(emptyForm);
     setShowMore(false);
     setOpen(false);
     refreshSitefold();
@@ -164,6 +190,11 @@ export default function HomePage() {
 
   const hasContacts = contacts.length > 0;
   const continueJobs = recent.filter((r) => r.job.id !== active?.job.id).slice(0, 5);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredContacts = useMemo(
+    () => contacts.filter((c) => contactMatchesQuery(c, normalizedQuery)),
+    [contacts, normalizedQuery],
+  );
 
   return (
     <div className="space-y-6">
@@ -375,9 +406,24 @@ export default function HomePage() {
             Contact folders
           </h2>
           <span className="text-xs text-muted-foreground">
-            {contacts.length} {contacts.length === 1 ? "folder" : "folders"}
+            {normalizedQuery
+              ? `${filteredContacts.length} of ${contacts.length}`
+              : `${contacts.length} ${contacts.length === 1 ? "folder" : "folders"}`}
           </span>
         </div>
+
+        {hasContacts ? (
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, phone, email, address…"
+              className="bg-white/70 pl-9"
+              aria-label="Search contacts"
+            />
+          </div>
+        ) : null}
 
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -389,10 +435,23 @@ export default function HomePage() {
               Import from your phone or add one manually to start a job folder.
             </p>
           </div>
+        ) : filteredContacts.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] px-4 py-8 text-center text-sm text-muted-foreground">
+            No contacts match “{query.trim()}”.
+          </p>
         ) : (
           <ul className="space-y-2">
-            {contacts.map((c) => {
+            {filteredContacts.map((c) => {
               const counts = jobCounts[c.id];
+              const subtitle = [
+                counts
+                  ? `${counts.open} open · ${counts.total} jobs`
+                  : "…",
+                c.phone || null,
+                c.address || null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
               return (
                 <li key={c.id}>
                   <Link
@@ -405,10 +464,7 @@ export default function HomePage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{c.name}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {counts
-                          ? `${counts.open} open · ${counts.total} jobs`
-                          : "…"}
-                        {c.phone ? ` · ${c.phone}` : ""}
+                        {subtitle}
                       </p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5" />
@@ -431,15 +487,8 @@ function ContactCreateForm({
   pickerOk,
   onSubmit,
 }: {
-  form: { name: string; phone: string; email: string; notes: string };
-  setForm: React.Dispatch<
-    React.SetStateAction<{
-      name: string;
-      phone: string;
-      email: string;
-      notes: string;
-    }>
-  >;
+  form: ContactForm;
+  setForm: React.Dispatch<React.SetStateAction<ContactForm>>;
   showMore: boolean;
   setShowMore: (v: boolean) => void;
   pickerOk: boolean;
@@ -465,6 +514,19 @@ function ContactCreateForm({
           type="tel"
           value={form.phone}
           onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="address">Address (optional)</Label>
+        <Textarea
+          id="address"
+          value={form.address}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, address: e.target.value }))
+          }
+          placeholder="Job site or mailing address"
+          rows={2}
+          className="min-h-0"
         />
       </div>
       {showMore ? (
