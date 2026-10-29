@@ -236,6 +236,62 @@ export async function punchOut(punchId?: string) {
   return punch;
 }
 
+export async function updatePunch(
+  punchId: string,
+  patch: { punchedInAt?: string; punchedOutAt?: string | null },
+) {
+  const db = await getDb();
+  const punch = await db.get("punches", punchId);
+  if (!punch) {
+    throw new Error("Punch not found.");
+  }
+
+  const next: Punch = {
+    ...punch,
+    punchedInAt: patch.punchedInAt ?? punch.punchedInAt,
+    punchedOutAt:
+      patch.punchedOutAt !== undefined ? patch.punchedOutAt : punch.punchedOutAt,
+  };
+
+  if (!next.punchedInAt || Number.isNaN(Date.parse(next.punchedInAt))) {
+    throw new Error("Punch in time is required.");
+  }
+
+  if (next.punchedOutAt !== null) {
+    if (Number.isNaN(Date.parse(next.punchedOutAt))) {
+      throw new Error("Punch out time is invalid.");
+    }
+    if (
+      new Date(next.punchedOutAt).getTime() <=
+      new Date(next.punchedInAt).getTime()
+    ) {
+      throw new Error("Punch out time must be after punch in time.");
+    }
+  } else {
+    const all = await db.getAll("punches");
+    const otherOpen = all.find(
+      (p) => p.id !== punchId && p.punchedOutAt === null,
+    );
+    if (otherOpen) {
+      throw new Error(
+        "Another punch is already open. Set an out time there (or punch out) before leaving this punch open.",
+      );
+    }
+  }
+
+  await db.put("punches", next);
+  return next;
+}
+
+export async function deletePunch(punchId: string) {
+  const db = await getDb();
+  const punch = await db.get("punches", punchId);
+  if (!punch) {
+    throw new Error("Punch not found.");
+  }
+  await db.delete("punches", punchId);
+}
+
 /** Punch out any open punch, then punch in on `jobId` (no-op if already open there). */
 export async function switchPunchToJob(jobId: string) {
   const existing = await getOpenPunch();
