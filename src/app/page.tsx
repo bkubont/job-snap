@@ -357,16 +357,16 @@ export default function HomePage() {
         </section>
       ) : (
         <section className="relative overflow-hidden rounded-[1.75rem] bg-[oklch(0.32_0.05_155)] px-5 py-7 text-[oklch(0.97_0.02_95)] shadow-sm">
-          <div className="absolute -right-8 -top-10 h-40 w-40 rounded-full bg-[oklch(0.72_0.12_75_/0.25)] blur-2xl" />
-          <div className="absolute bottom-0 left-1/3 h-24 w-48 rounded-full bg-[oklch(0.5_0.06_180_/0.2)] blur-2xl" />
-          <p className="font-heading text-3xl font-semibold tracking-tight">
+          <div className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-[oklch(0.72_0.12_75_/0.25)] blur-2xl" />
+          <div className="pointer-events-none absolute bottom-0 left-1/3 h-24 w-48 rounded-full bg-[oklch(0.5_0.06_180_/0.2)] blur-2xl" />
+          <p className="relative font-heading text-3xl font-semibold tracking-tight">
             Job Snap
           </p>
-          <p className="mt-2 max-w-[18rem] text-sm leading-relaxed text-[oklch(0.9_0.03_95_/0.85)]">
+          <p className="relative mt-2 max-w-[18rem] text-sm leading-relaxed text-[oklch(0.9_0.03_95_/0.85)]">
             Your phone contacts become job folders. Punch the clock, snap photos,
             jot the day, export the hours.
           </p>
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="relative mt-5 flex flex-wrap gap-2">
             {pickerOk ? (
               <Button
                 onClick={onImportFromPhone}

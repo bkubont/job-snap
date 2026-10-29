@@ -18,8 +18,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex min-h-full flex-col">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -left-24 top-0 h-72 w-72 rounded-full bg-[oklch(0.72_0.12_75_/0.18)] blur-3xl" />
-        <div className="absolute -right-16 top-40 h-80 w-80 rounded-full bg-[oklch(0.45_0.06_155_/0.2)] blur-3xl" />
+        <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-[oklch(0.72_0.12_75_/0.18)] blur-3xl" />
+        <div className="pointer-events-none absolute -right-16 top-40 h-80 w-80 rounded-full bg-[oklch(0.45_0.06_155_/0.2)] blur-3xl" />
         <div
           className="absolute inset-0 opacity-[0.035]"
           style={{
