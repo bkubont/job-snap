@@ -25,6 +25,7 @@ import {
   switchPunchToJob,
   listAllPunches,
   listAllJobs,
+  listAllPhotos,
   listDayNotes,
   listContacts,
 } from "@/lib/db";
@@ -143,17 +144,19 @@ export default function HomePage() {
   async function onThisWeekCsv() {
     setCsvBusy(true);
     try {
-      const [punches, jobs, contactRows, dayNotes] = await Promise.all([
+      const [punches, jobs, contactRows, dayNotes, photos] = await Promise.all([
         listAllPunches(),
         listAllJobs(),
         listContacts(),
         listDayNotes(),
+        listAllPhotos(),
       ]);
       await downloadThisWeekCsv({
         punches,
         jobs,
         contacts: contactRows,
         dayNotes,
+        photos,
       });
     } catch (e) {
       alert(e instanceof Error ? e.message : "Could not download CSV");
