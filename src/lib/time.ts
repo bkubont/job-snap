@@ -45,3 +45,13 @@ export function formatElapsedLive(startIso: string) {
 export function hoursFromMinutes(mins: number) {
   return (mins / 60).toFixed(2);
 }
+
+/** Value for `<input type="datetime-local">` from an ISO timestamp. */
+export function toDatetimeLocalValue(iso: string) {
+  return format(parseISO(iso), "yyyy-MM-dd'T'HH:mm");
+}
+
+/** Convert a datetime-local input value to ISO. */
+export function fromDatetimeLocalValue(value: string) {
+  return new Date(value).toISOString();
+}
