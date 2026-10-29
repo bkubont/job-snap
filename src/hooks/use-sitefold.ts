@@ -132,6 +132,25 @@ export function useActivePunch() {
   return { active, refresh: bump };
 }
 
+export function useRecentJobs(limit = 5) {
+  const v = useDbVersion();
+  const [recent, setRecent] = useState<
+    Awaited<ReturnType<typeof db.listRecentJobs>>
+  >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    db.listRecentJobs(limit).then((rows) => {
+      if (!cancelled) setRecent(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [v, limit]);
+
+  return { recent, refresh: bump };
+}
+
 export function useDayNote(date: string) {
   const v = useDbVersion();
   const [note, setNote] = useState<DayNote | null>(null);

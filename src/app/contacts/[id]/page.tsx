@@ -5,17 +5,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  ArrowRightLeft,
   Briefcase,
   ChevronRight,
+  Play,
   Plus,
   Trash2,
 } from "lucide-react";
-import { useContact, refreshSitefold } from "@/hooks/use-sitefold";
-import { createJob, deleteContact, updateJob } from "@/lib/db";
+import {
+  useContact,
+  useActivePunch,
+  refreshSitefold,
+} from "@/hooks/use-sitefold";
+import {
+  createJob,
+  deleteContact,
+  updateJob,
+  switchPunchToJob,
+} from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -34,9 +44,11 @@ export default function ContactPage({
   const { id } = use(params);
   const router = useRouter();
   const { contact, jobs } = useContact(id);
+  const { active } = useActivePunch();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
+  const [busyJobId, setBusyJobId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   if (contact === undefined) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -52,15 +64,38 @@ export default function ContactPage({
     );
   }
 
-  async function onAddJob(e: React.FormEvent) {
+  async function createAndPunch(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    const job = await createJob(id, title, notes);
-    setTitle("");
-    setNotes("");
-    setOpen(false);
-    refreshSitefold();
-    router.push(`/jobs/${job.id}`);
+    setCreating(true);
+    try {
+      const job = await createJob(id, title);
+      setTitle("");
+      setOpen(false);
+      await switchPunchToJob(job.id);
+      refreshSitefold();
+      router.push(`/jobs/${job.id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not create job");
+      refreshSitefold();
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function onAddJobOnly(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setCreating(true);
+    try {
+      const job = await createJob(id, title);
+      setTitle("");
+      setOpen(false);
+      refreshSitefold();
+      router.push(`/jobs/${job.id}`);
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function onDelete() {
@@ -84,6 +119,18 @@ export default function ContactPage({
       status: status === "open" ? "closed" : "open",
     });
     refreshSitefold();
+  }
+
+  async function onQuickPunch(jobId: string) {
+    setBusyJobId(jobId);
+    try {
+      await switchPunchToJob(jobId);
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not punch in");
+    } finally {
+      setBusyJobId(null);
+    }
   }
 
   return (
@@ -119,20 +166,26 @@ export default function ContactPage({
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h2 className="font-heading text-lg font-semibold">Jobs</h2>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(v) => {
+            setOpen(v);
+            if (!v) setTitle("");
+          }}
+        >
           <DialogTrigger asChild>
             <Button size="sm">
               <Plus className="h-4 w-4" />
-              New job
+              New job &amp; punch in
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle>New job in {contact.name}</DialogTitle>
             </DialogHeader>
-            <form onSubmit={onAddJob} className="space-y-3">
+            <form onSubmit={createAndPunch} className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="title">Job title</Label>
                 <Input
@@ -141,19 +194,24 @@ export default function ContactPage({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Kitchen remodel, Service call…"
+                  autoFocus
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="job-notes">Notes</Label>
-                <Textarea
-                  id="job-notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                />
-              </div>
-              <Button type="submit" className="w-full">
-                Create job
+              <p className="text-xs text-muted-foreground">
+                Notes live on the job page after create.
+              </p>
+              <Button type="submit" className="w-full" disabled={creating}>
+                <Play className="h-4 w-4" />
+                {creating ? "Starting…" : "Create & punch in"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                disabled={creating || !title.trim()}
+                onClick={onAddJobOnly}
+              >
+                Create without punching in
               </Button>
             </form>
           </DialogContent>
@@ -169,39 +227,67 @@ export default function ContactPage({
         </div>
       ) : (
         <ul className="space-y-2">
-          {jobs.map((job) => (
-            <li key={job.id}>
-              <div className="flex items-stretch gap-2 rounded-2xl bg-white/70 p-1.5 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
-                <Link
-                  href={`/jobs/${job.id}`}
-                  className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2.5 py-2.5 transition hover:bg-[oklch(0.96_0.01_95)]"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate font-medium">{job.title}</p>
-                      <Badge
-                        variant={job.status === "open" ? "default" : "secondary"}
-                        className="shrink-0 text-[10px]"
-                      >
-                        {job.status}
-                      </Badge>
+          {jobs.map((job) => {
+            const isHere = active?.job.id === job.id;
+            const switchMode = !!active && !isHere;
+            return (
+              <li key={job.id}>
+                <div className="flex items-stretch gap-1.5 rounded-2xl bg-white/70 p-1.5 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+                  <Link
+                    href={`/jobs/${job.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2.5 py-2.5 transition hover:bg-[oklch(0.96_0.01_95)]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate font-medium">{job.title}</p>
+                        <Badge
+                          variant={
+                            job.status === "open" ? "default" : "secondary"
+                          }
+                          className="shrink-0 text-[10px]"
+                        >
+                          {job.status}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Started {formatDay(job.createdAt)}
+                        {isHere ? " · on clock" : ""}
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Started {formatDay(job.createdAt)}
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => toggleStatus(job.id, job.status)}
-                  className="shrink-0 self-center px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                >
-                  {job.status === "open" ? "Close" : "Reopen"}
-                </button>
-              </div>
-            </li>
-          ))}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  </Link>
+                  {job.status === "open" && !isHere ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busyJobId === job.id}
+                      onClick={() => onQuickPunch(job.id)}
+                      className="shrink-0 self-center"
+                    >
+                      {switchMode ? (
+                        <>
+                          <ArrowRightLeft className="h-3.5 w-3.5" />
+                          Switch
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3.5 w-3.5" />
+                          In
+                        </>
+                      )}
+                    </Button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => toggleStatus(job.id, job.status)}
+                    className="shrink-0 self-center px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    {job.status === "open" ? "Close" : "Reopen"}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

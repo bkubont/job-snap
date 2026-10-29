@@ -1,6 +1,13 @@
-import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from "date-fns";
+import {
+  format,
+  parseISO,
+  isWithinInterval,
+  startOfDay,
+  endOfDay,
+  subDays,
+} from "date-fns";
 import type { Contact, DayNote, Job, Punch } from "./types";
-import { durationMinutes, formatDateTime, hoursFromMinutes } from "./time";
+import { durationMinutes, formatDateTime, hoursFromMinutes, todayKey } from "./time";
 
 export type ExportRow = {
   date: string;
@@ -116,6 +123,25 @@ export function downloadTextFile(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Last 7 days (same range as Export “Last 7 days”), then trigger CSV download. */
+export async function downloadThisWeekCsv(load: {
+  punches: Punch[];
+  jobs: Job[];
+  contacts: Contact[];
+  dayNotes: DayNote[];
+}) {
+  const to = todayKey();
+  const from = format(subDays(new Date(), 6), "yyyy-MM-dd");
+  const rows = buildExportRows({ ...load, from, to });
+  const csv = rowsToCsv(rows, load.dayNotes, from, to);
+  downloadTextFile(
+    `job-snap-timecard-${from}-to-${to}.csv`,
+    csv,
+    "text/csv;charset=utf-8",
+  );
+  return { from, to, rowCount: rows.length };
 }
 
 export function summarizeByDay(rows: ExportRow[]) {
