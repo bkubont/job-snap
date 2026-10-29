@@ -1,0 +1,66 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useActivePunch } from "@/hooks/use-sitefold";
+import { formatElapsedLive } from "@/lib/time";
+import { punchOut } from "@/lib/db";
+import { refreshSitefold } from "@/hooks/use-sitefold";
+import { Button } from "@/components/ui/button";
+
+export function ActivePunchBar() {
+  const { active } = useActivePunch();
+  const [, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+
+  if (!active) return null;
+
+  async function onPunchOut() {
+    setBusy(true);
+    try {
+      await punchOut(active!.punch.id);
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not punch out");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-[oklch(0.55_0.12_75_/0.25)] bg-[oklch(0.42_0.08_155)] px-4 py-2.5 text-[oklch(0.97_0.02_95)]">
+      <div className="mx-auto flex max-w-lg items-center gap-3">
+        <span className="relative flex h-2.5 w-2.5 shrink-0">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[oklch(0.82_0.14_75)] opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[oklch(0.82_0.14_75)]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">
+            On the clock · {formatElapsedLive(active.punch.punchedInAt)}
+          </p>
+          <Link
+            href={`/jobs/${active.job.id}`}
+            className="truncate text-xs text-[oklch(0.9_0.03_95_/0.85)] underline-offset-2 hover:underline"
+          >
+            {active.contact.name} / {active.job.title}
+          </Link>
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={onPunchOut}
+          className="shrink-0 bg-[oklch(0.92_0.04_85)] text-[oklch(0.28_0.04_155)] hover:bg-white"
+        >
+          Punch out
+        </Button>
+      </div>
+    </div>
+  );
+}
