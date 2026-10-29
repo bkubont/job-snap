@@ -45,3 +45,9 @@ export type ActivePunchInfo = {
   job: Job;
   contact: Contact;
 };
+
+export type RecentJobInfo = {
+  job: Job;
+  contact: Contact;
+  lastPunchedInAt: string;
+};

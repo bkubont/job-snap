@@ -6,6 +6,7 @@ import type {
   Job,
   Photo,
   Punch,
+  RecentJobInfo,
 } from "./types";
 
 interface SitefoldDB extends DBSchema {
@@ -233,6 +234,54 @@ export async function punchOut(punchId?: string) {
   punch.punchedOutAt = now();
   await db.put("punches", punch);
   return punch;
+}
+
+/** Punch out any open punch, then punch in on `jobId` (no-op if already open there). */
+export async function switchPunchToJob(jobId: string) {
+  const existing = await getOpenPunch();
+  if (existing?.job.id === jobId) {
+    return existing.punch;
+  }
+  if (existing) {
+    await punchOut(existing.punch.id);
+  }
+  return punchIn(jobId);
+}
+
+/** Ensure job is open, then switch/punch in. */
+export async function reopenAndPunchIn(jobId: string) {
+  const job = await getJob(jobId);
+  if (!job) throw new Error("Job not found.");
+  if (job.status === "closed") {
+    await updateJob({ ...job, status: "open" });
+  }
+  return switchPunchToJob(jobId);
+}
+
+/** Most recent jobs by last punch-in time (unique jobs). */
+export async function listRecentJobs(limit = 5): Promise<RecentJobInfo[]> {
+  const db = await getDb();
+  const punches = await db.getAllFromIndex("punches", "by-in");
+  punches.sort(
+    (a, b) =>
+      new Date(b.punchedInAt).getTime() - new Date(a.punchedInAt).getTime(),
+  );
+
+  const seen = new Set<string>();
+  const results: RecentJobInfo[] = [];
+
+  for (const punch of punches) {
+    if (seen.has(punch.jobId)) continue;
+    seen.add(punch.jobId);
+    const job = await getJob(punch.jobId);
+    if (!job) continue;
+    const contact = await getContact(job.contactId);
+    if (!contact) continue;
+    results.push({ job, contact, lastPunchedInAt: punch.punchedInAt });
+    if (results.length >= limit) break;
+  }
+
+  return results;
 }
 
 export async function listPhotosForJob(jobId: string): Promise<Photo[]> {

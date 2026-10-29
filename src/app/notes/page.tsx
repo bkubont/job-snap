@@ -2,50 +2,83 @@
 
 import { useEffect, useState } from "react";
 import { addDays, format, parseISO } from "date-fns";
-import { ChevronLeft, ChevronRight, Save } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useDayNote, useDayNotes } from "@/hooks/use-sitefold";
 import { todayKey, formatDay } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 
+const AUTOSAVE_MS = 600;
+
 export default function NotesPage() {
-  const [date, setDate] = useState("");
-  const { note, loading, save } = useDayNote(date || "1970-01-01");
+  const [date, setDate] = useState(todayKey);
+  const { note, loading, save } = useDayNote(date);
   const { notes } = useDayNotes();
-  const [body, setBody] = useState("");
+  const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
 
-  useEffect(() => {
-    setDate(todayKey());
-  }, []);
+  const body = draft ?? note?.body ?? "";
+  const dirty = draft !== null && draft !== (note?.body ?? "");
 
   useEffect(() => {
-    setBody(note?.body ?? "");
-  }, [note, date]);
+    if (!dirty || draft === null) return;
+    const snapshot = draft;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        setSaving(true);
+        try {
+          await save(snapshot);
+          setDraft(null);
+          setSavedFlash(true);
+          window.setTimeout(() => setSavedFlash(false), 1500);
+        } finally {
+          setSaving(false);
+        }
+      })();
+    }, AUTOSAVE_MS);
+    return () => window.clearTimeout(t);
+  }, [draft, dirty, save]);
 
-  function shift(days: number) {
-    const next = format(addDays(parseISO(`${date}T12:00:00`), days), "yyyy-MM-dd");
-    setDate(next);
-  }
-
-  async function onSave() {
+  async function persist() {
+    if (draft === null) return;
+    if (draft === (note?.body ?? "")) {
+      setDraft(null);
+      return;
+    }
     setSaving(true);
     try {
-      await save(body);
+      await save(draft);
+      setDraft(null);
       setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1500);
+      window.setTimeout(() => setSavedFlash(false), 1500);
     } finally {
       setSaving(false);
     }
   }
 
+  function changeDate(next: string) {
+    void persist();
+    setDraft(null);
+    setDate(next);
+  }
+
+  function shift(days: number) {
+    changeDate(
+      format(addDays(parseISO(`${date}T12:00:00`), days), "yyyy-MM-dd"),
+    );
+  }
+
   const recent = notes.filter((n) => n.body.trim()).slice(0, 8);
 
-  if (!date) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
-  }
+  const statusLabel = savedFlash
+    ? "Saved"
+    : saving
+      ? "Saving…"
+      : dirty
+        ? "Editing…"
+        : "Autosaved";
 
   return (
     <div className="space-y-6">
@@ -54,7 +87,8 @@ export default function NotesPage() {
           Day notes
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          One notebook for the day — exported with your time clock.
+          One notebook for the day — autosaves as you type. Exported with your
+          time clock.
         </p>
       </div>
 
@@ -70,7 +104,7 @@ export default function NotesPage() {
         <Input
           type="date"
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={(e) => changeDate(e.target.value)}
           className="flex-1 bg-white/70"
         />
         <Button
@@ -81,7 +115,11 @@ export default function NotesPage() {
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => setDate(todayKey())}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => changeDate(todayKey())}
+        >
           Today
         </Button>
       </div>
@@ -89,14 +127,16 @@ export default function NotesPage() {
       <section className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-lg font-semibold">{formatDay(date)}</h2>
-          <Button size="sm" onClick={onSave} disabled={saving || loading}>
-            <Save className="h-4 w-4" />
-            {savedFlash ? "Saved" : saving ? "Saving…" : "Save"}
-          </Button>
+          <span className="text-xs font-medium text-muted-foreground">
+            {statusLabel}
+          </span>
         </div>
         <Textarea
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            void persist();
+          }}
           placeholder="Weather, what got done, materials ordered, who you talked to…"
           rows={10}
           className="min-h-48 bg-white/70 text-base leading-relaxed"
@@ -112,7 +152,7 @@ export default function NotesPage() {
               <li key={n.id}>
                 <button
                   type="button"
-                  onClick={() => setDate(n.date)}
+                  onClick={() => changeDate(n.date)}
                   className="w-full rounded-2xl bg-white/70 px-4 py-3 text-left ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
                 >
                   <p className="text-xs font-medium text-muted-foreground">
