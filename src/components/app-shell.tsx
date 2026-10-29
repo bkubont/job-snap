@@ -5,6 +5,9 @@ import { usePathname } from "next/navigation";
 import { FolderOpen, NotebookPen, Download, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ActivePunchBar } from "@/components/active-punch-bar";
+import { BackupNudge } from "@/components/backup-nudge";
+import { InstallPrompt } from "@/components/install-prompt";
+import { PwaRegister } from "@/components/pwa-register";
 
 const nav = [
   { href: "/", label: "Contacts", icon: FolderOpen },
@@ -17,6 +20,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="relative flex min-h-full flex-col">
+      <PwaRegister />
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-[oklch(0.72_0.12_75_/0.18)] blur-3xl" />
         <div className="pointer-events-none absolute -right-16 top-40 h-80 w-80 rounded-full bg-[oklch(0.45_0.06_155_/0.2)] blur-3xl" />
@@ -46,6 +50,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
         <ActivePunchBar />
+        <BackupNudge />
+        <InstallPrompt />
       </header>
 
       <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-28 pt-5">

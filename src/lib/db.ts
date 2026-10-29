@@ -434,3 +434,73 @@ export async function countJobsForContact(contactId: string) {
 export async function photoCountForJob(jobId: string) {
   return (await listPhotosForJob(jobId)).length;
 }
+
+/** Snapshot every store for full-device backup (not a timecard export). */
+export async function readAllData() {
+  const [contacts, jobs, punches, dayNotes, photos] = await Promise.all([
+    listContacts(),
+    listAllJobs(),
+    listAllPunches(),
+    listDayNotes(),
+    listAllPhotos(),
+  ]);
+  return { contacts, jobs, punches, dayNotes, photos };
+}
+
+/**
+ * Wipe IndexedDB stores and replace with a full backup payload.
+ * Photos must already include Blob values.
+ */
+export async function replaceAllData(data: {
+  contacts: Contact[];
+  jobs: Job[];
+  punches: Punch[];
+  dayNotes: DayNote[];
+  photos: Photo[];
+}) {
+  const db = await getDb();
+  const tx = db.transaction(
+    ["contacts", "jobs", "punches", "photos", "dayNotes"],
+    "readwrite",
+  );
+
+  await Promise.all([
+    tx.objectStore("contacts").clear(),
+    tx.objectStore("jobs").clear(),
+    tx.objectStore("punches").clear(),
+    tx.objectStore("photos").clear(),
+    tx.objectStore("dayNotes").clear(),
+  ]);
+
+  for (const contact of data.contacts) {
+    await tx.objectStore("contacts").put(normalizeContact(contact)!);
+  }
+  for (const job of data.jobs) {
+    await tx.objectStore("jobs").put({
+      ...job,
+      title: job.title.trim(),
+      notes: job.notes ?? "",
+      status: job.status === "closed" ? "closed" : "open",
+    });
+  }
+  for (const punch of data.punches) {
+    await tx.objectStore("punches").put({
+      ...punch,
+      punchedOutAt: punch.punchedOutAt ?? null,
+    });
+  }
+  for (const note of data.dayNotes) {
+    await tx.objectStore("dayNotes").put({
+      ...note,
+      body: note.body ?? "",
+    });
+  }
+  for (const photo of data.photos) {
+    await tx.objectStore("photos").put({
+      ...photo,
+      caption: photo.caption ?? "",
+    });
+  }
+
+  await tx.done;
+}
