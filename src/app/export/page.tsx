@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { format, startOfMonth, subDays } from "date-fns";
-import { Download, FolderArchive, Printer } from "lucide-react";
+import {
+  Download,
+  FolderArchive,
+  HardDriveDownload,
+  Printer,
+  Upload,
+} from "lucide-react";
 import {
   listAllJobs,
   listAllPhotos,
@@ -23,10 +29,23 @@ import {
   summarizeByDay,
   type PhotoExportItem,
 } from "@/lib/export";
+import {
+  downloadFullBackup,
+  getLastBackupAt,
+  restoreFullBackup,
+} from "@/lib/backup";
 import { formatDay, hoursFromMinutes, todayKey } from "@/lib/time";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -69,11 +88,20 @@ export default function ExportPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
   const [packaging, setPackaging] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const end = new Date();
     setFrom(format(startOfMonth(end), "yyyy-MM-dd"));
     setTo(todayKey());
+    setLastBackupAt(getLastBackupAt());
   }, []);
 
   useEffect(() => {
@@ -158,6 +186,50 @@ export default function ExportPage() {
 
   function onPrint() {
     window.print();
+  }
+
+  async function onFullBackup() {
+    setBackingUp(true);
+    setBackupError(null);
+    setBackupMessage(null);
+    try {
+      const counts = await downloadFullBackup();
+      setLastBackupAt(getLastBackupAt());
+      setBackupMessage(
+        `Backup saved · ${counts.contacts} contacts, ${counts.jobs} jobs, ${counts.punches} punches, ${counts.photos} photos.`,
+      );
+    } catch (err) {
+      setBackupError(
+        err instanceof Error ? err.message : "Could not create backup.",
+      );
+    } finally {
+      setBackingUp(false);
+    }
+  }
+
+  function onPickRestore(file: File | null) {
+    if (!file) return;
+    setPendingFile(file);
+    setRestoreOpen(true);
+    setBackupError(null);
+  }
+
+  async function onConfirmRestore() {
+    if (!pendingFile) return;
+    setRestoring(true);
+    setBackupError(null);
+    try {
+      await restoreFullBackup(pendingFile);
+      setRestoreOpen(false);
+      setPendingFile(null);
+      // Full reload so every screen picks up replaced IndexedDB data
+      window.location.assign("/export#full-backup");
+    } catch (err) {
+      setBackupError(
+        err instanceof Error ? err.message : "Could not restore backup.",
+      );
+      setRestoring(false);
+    }
   }
 
   function quickRange(kind: "week" | "month" | "today") {
@@ -253,6 +325,112 @@ export default function ExportPage() {
           </p>
         )}
       </section>
+
+      <section
+        id="full-backup"
+        className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:hidden scroll-mt-28"
+      >
+        <div>
+          <h2 className="font-heading text-lg font-semibold text-[oklch(0.28_0.04_155)]">
+            Full backup
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Download everything on this device — contacts, jobs, punches, day
+            notes, and photo blobs — or restore a previous archive. This is
+            separate from the timecard CSV / ZIP above.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={onFullBackup} disabled={loading || backingUp}>
+            <HardDriveDownload className="h-4 w-4" />
+            {backingUp ? "Building…" : "Download backup"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={loading || restoring}
+            onClick={() => restoreInputRef.current?.click()}
+          >
+            <Upload className="h-4 w-4" />
+            Restore…
+          </Button>
+          <input
+            ref={restoreInputRef}
+            type="file"
+            accept=".zip,application/zip"
+            className="hidden"
+            onChange={(e) => {
+              onPickRestore(e.target.files?.[0] ?? null);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        {lastBackupAt ? (
+          <p className="text-xs text-muted-foreground">
+            Last backup on this browser:{" "}
+            <span className="tabular-nums">
+              {format(new Date(lastBackupAt), "MMM d, yyyy · h:mm a")}
+            </span>
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No full backup recorded on this browser yet.
+          </p>
+        )}
+        {backupMessage ? (
+          <p className="text-xs text-[oklch(0.35_0.06_155)]">{backupMessage}</p>
+        ) : null}
+        {backupError ? (
+          <p className="text-xs text-destructive">{backupError}</p>
+        ) : null}
+      </section>
+
+      <Dialog
+        open={restoreOpen}
+        onOpenChange={(open) => {
+          if (restoring) return;
+          setRestoreOpen(open);
+          if (!open) setPendingFile(null);
+        }}
+      >
+        <DialogContent showCloseButton={!restoring}>
+          <DialogHeader>
+            <DialogTitle>Restore full backup?</DialogTitle>
+            <DialogDescription>
+              This replaces all local data. Contacts, jobs, punches, notes, and
+              photos currently on this device will be wiped and replaced by the
+              archive
+              {pendingFile ? (
+                <>
+                  {" "}
+                  <span className="font-medium text-foreground">
+                    {pendingFile.name}
+                  </span>
+                </>
+              ) : null}
+              .
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={restoring}
+              onClick={() => {
+                setRestoreOpen(false);
+                setPendingFile(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={restoring || !pendingFile}
+              onClick={onConfirmRestore}
+            >
+              {restoring ? "Restoring…" : "Replace all local data"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <section className="space-y-4" id="export-preview">
         <div className="flex items-end justify-between gap-3">
