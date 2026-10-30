@@ -216,3 +216,14 @@ Agreed decisions: existing **open → In Progress** and **closed → Completed**
 - **Not yet tested on a real device:** iPhone Safari, the installed home-screen app, and desktop Safari. That includes the iOS download fix, a large-backup stress test, save on swipe-away, and whether iOS honours persistent storage.
 - **No syncing:** data stays on the device it was entered on; moving between devices is by backup and restore.
 - **No dark mode:** the app uses a single light theme.
+
+---
+
+## 11. Phase 5 status (validation)
+
+- **New `e2e/conditions.spec.ts`** covering the handoff's "narrow screens, slow connections, interrupted uploads, common error conditions": no sideways scrolling at 320 px on 14 views; slow 3G; offline after one visit; storage filling up during a photo save; damaged backup file; a non-contact import file.
+- **Defects found and fixed during validation:**
+  - **D16:** job and contact pages, and in-app navigation, failed offline. They fetch route data (`?_rsc=` requests) that the service worker didn't cache. The service worker now caches route data network-first, with a 4-second fallback to the cached copy (cache `v4`).
+  - **D17:** messages shown while a dialog was open were hidden from screen readers. The message area is now an `aria-live` region.
+- **Results:** 20 of 20 tests pass on repeated runs; lint and type checks are clean. Slow 3G, first visit: the menu shows at 0.5 s and the page is usable at 5.9 s.
+- The final deliverables, including the real-device checklist, are in [`HANDOFF.md`](./HANDOFF.md).

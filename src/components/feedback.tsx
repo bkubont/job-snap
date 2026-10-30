@@ -101,7 +101,10 @@ export function FeedbackHost() {
 
   return (
     <>
+      {/* aria-live keeps messages audible even while a modal dialog hides
+          the rest of the page from screen readers. */}
       <div
+        aria-live="polite"
         className="pointer-events-none fixed inset-x-0 z-[70] flex flex-col items-center gap-2 px-4"
         style={{ bottom: "calc(5.25rem + env(safe-area-inset-bottom))" }}
       >
