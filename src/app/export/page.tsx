@@ -81,6 +81,8 @@ function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
 export default function ExportPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [jobId, setJobId] = useState("");
   const [punches, setPunches] = useState<Punch[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -129,41 +131,107 @@ export default function ExportPage() {
     };
   }, []);
 
+  const jobsForFilter = useMemo(() => {
+    const list = contactId
+      ? jobs.filter((j) => j.contactId === contactId)
+      : jobs;
+    return [...list].sort((a, b) => a.title.localeCompare(b.title));
+  }, [jobs, contactId]);
+
+  const filterArgs = useMemo(
+    () => ({
+      contactId: contactId || null,
+      jobId: jobId || null,
+    }),
+    [contactId, jobId],
+  );
+
+  const selectedContact = useMemo(
+    () => (contactId ? contacts.find((c) => c.id === contactId) ?? null : null),
+    [contacts, contactId],
+  );
+
+  const selectedJob = useMemo(
+    () => (jobId ? jobs.find((j) => j.id === jobId) ?? null : null),
+    [jobs, jobId],
+  );
+
+  const filterLabel = useMemo(() => {
+    if (selectedJob && selectedContact) {
+      return `${selectedContact.name} · ${selectedJob.title}`;
+    }
+    if (selectedContact) return selectedContact.name;
+    if (selectedJob) return selectedJob.title;
+    return "All contacts";
+  }, [selectedContact, selectedJob]);
+
   const rows = useMemo(
     () =>
       from && to
-        ? buildExportRows({ punches, jobs, contacts, dayNotes, from, to })
+        ? buildExportRows({
+            punches,
+            jobs,
+            contacts,
+            dayNotes,
+            from,
+            to,
+            ...filterArgs,
+          })
         : [],
-    [punches, jobs, contacts, dayNotes, from, to],
+    [punches, jobs, contacts, dayNotes, from, to, filterArgs],
   );
 
   const jobNotes = useMemo(
     () =>
       from && to
-        ? buildJobNoteRows({ punches, jobs, contacts, from, to })
+        ? buildJobNoteRows({
+            punches,
+            jobs,
+            contacts,
+            from,
+            to,
+            ...filterArgs,
+          })
         : [],
-    [punches, jobs, contacts, from, to],
+    [punches, jobs, contacts, from, to, filterArgs],
   );
 
   const photoItems = useMemo(
     () =>
       from && to
-        ? buildPhotoExportItems({ punches, jobs, contacts, photos, from, to })
+        ? buildPhotoExportItems({
+            punches,
+            jobs,
+            contacts,
+            photos,
+            from,
+            to,
+            ...filterArgs,
+          })
         : [],
-    [punches, jobs, contacts, photos, from, to],
+    [punches, jobs, contacts, photos, from, to, filterArgs],
   );
 
   const photoGroups = useMemo(() => photosByJob(photoItems), [photoItems]);
   const byDay = useMemo(() => summarizeByDay(rows), [rows]);
   const totalMins = rows.reduce((s, r) => s + r.minutes, 0);
+  const openCount = rows.filter((r) => r.isOpen).length;
 
   function csvContent() {
-    return rowsToCsv(rows, dayNotes, from, to, jobNotes, photoItems);
+    return rowsToCsv(rows, dayNotes, from, to, jobNotes, photoItems, {
+      contact: selectedContact,
+      filterLabel:
+        contactId || jobId ? filterLabel : undefined,
+    });
   }
 
   function onCsv() {
+    const suffix =
+      contactId || jobId
+        ? `-${filterLabel.replace(/[^\w\-]+/g, "-").slice(0, 40)}`
+        : "";
     downloadTextFile(
-      `job-snap-timecard-${from}-to-${to}.csv`,
+      `job-snap-timecard-${from}-to-${to}${suffix}.csv`,
       csvContent(),
       "text/csv;charset=utf-8",
     );
@@ -172,13 +240,17 @@ export default function ExportPage() {
   async function onPackage() {
     setPackaging(true);
     try {
-      const csvName = `job-snap-timecard-${from}-to-${to}.csv`;
+      const suffix =
+        contactId || jobId
+          ? `-${filterLabel.replace(/[^\w\-]+/g, "-").slice(0, 40)}`
+          : "";
+      const csvName = `job-snap-timecard-${from}-to-${to}${suffix}.csv`;
       const zip = await buildExportPackageZip({
         csv: csvContent(),
         csvFilename: csvName,
         photos: photoItems,
       });
-      downloadBlob(`job-snap-export-${from}-to-${to}.zip`, zip);
+      downloadBlob(`job-snap-export-${from}-to-${to}${suffix}.zip`, zip);
     } finally {
       setPackaging(false);
     }
@@ -260,7 +332,7 @@ export default function ExportPage() {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Download or print your time clock with daily notes, job notes, and
-          site photos.
+          site photos. Filter by client for invoice-ready packages.
         </p>
       </div>
 
@@ -283,6 +355,43 @@ export default function ExportPage() {
               value={to}
               onChange={(e) => setTo(e.target.value)}
             />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="export-contact">Contact</Label>
+            <select
+              id="export-contact"
+              value={contactId}
+              onChange={(e) => {
+                setContactId(e.target.value);
+                setJobId("");
+              }}
+              className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <option value="">All contacts</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="export-job">Job</Label>
+            <select
+              id="export-job"
+              value={jobId}
+              onChange={(e) => setJobId(e.target.value)}
+              className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              <option value="">All jobs</option>
+              {jobsForFilter.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.title}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -438,6 +547,8 @@ export default function ExportPage() {
             <h2 className="font-heading text-lg font-semibold">Preview</h2>
             <p className="text-xs text-muted-foreground">
               {from} → {to}
+              {" · "}
+              {filterLabel}
               {photoItems.length > 0
                 ? ` · ${photoItems.length} photo${photoItems.length === 1 ? "" : "s"}`
                 : ""}
@@ -448,11 +559,46 @@ export default function ExportPage() {
           </p>
         </div>
 
+        {selectedContact ? (
+          <div className="rounded-2xl bg-white/80 px-4 py-3 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:break-inside-avoid">
+            <p className="font-heading font-semibold text-[oklch(0.28_0.04_155)]">
+              {selectedContact.name}
+            </p>
+            <ul className="mt-1 space-y-0.5 text-muted-foreground">
+              {selectedContact.phone ? (
+                <li>Phone: {selectedContact.phone}</li>
+              ) : null}
+              {selectedContact.email ? (
+                <li>Email: {selectedContact.email}</li>
+              ) : null}
+              {selectedContact.address ? (
+                <li>Address: {selectedContact.address}</li>
+              ) : null}
+              {!selectedContact.phone &&
+              !selectedContact.email &&
+              !selectedContact.address ? (
+                <li className="text-xs">No phone, email, or address on file</li>
+              ) : null}
+            </ul>
+          </div>
+        ) : null}
+
+        {openCount > 0 ? (
+          <p
+            role="status"
+            className="rounded-xl bg-[oklch(0.94_0.04_85)] px-3 py-2 text-sm text-[oklch(0.35_0.05_75)] ring-1 ring-[oklch(0.75_0.08_75_/0.35)]"
+          >
+            {openCount} open punch{openCount === 1 ? "" : "es"} listed as Still
+            open — excluded from billed hours.
+          </p>
+        ) : null}
+
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : empty ? (
           <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-            No punches in this range.
+            No punches in this range
+            {contactId || jobId ? " for this filter" : ""}.
           </p>
         ) : (
           <div className="space-y-4">
@@ -479,11 +625,21 @@ export default function ExportPage() {
                         <span className="font-medium">{row.contact}</span>
                         {" · "}
                         {row.job}
+                        {(row.phone || row.email || row.address) &&
+                        !selectedContact ? (
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {[row.phone, row.email, row.address]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        ) : null}
                         <span className="mt-0.5 block text-xs text-muted-foreground">
                           {row.punchedIn} → {row.punchedOut}
                         </span>
                       </span>
-                      <span className="shrink-0 tabular-nums">{row.hours}h</span>
+                      <span className="shrink-0 tabular-nums">
+                        {row.isOpen ? "—" : `${row.hours}h`}
+                      </span>
                     </li>
                   ))}
                 </ul>

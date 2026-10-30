@@ -74,6 +74,10 @@ export default function JobPage({
   const [editOut, setEditOut] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
 
   if (job === undefined) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -184,6 +188,31 @@ export default function JobPage({
     router.push(`/contacts/${job!.contactId}`);
   }
 
+  function openTitleEdit() {
+    setTitleDraft(job!.title);
+    setTitleError(null);
+    setTitleEditing(true);
+  }
+
+  async function saveTitle() {
+    const next = titleDraft.trim();
+    if (!next) {
+      setTitleError("Job title is required.");
+      return;
+    }
+    setSavingTitle(true);
+    setTitleError(null);
+    try {
+      await updateJob({ ...job!, title: next });
+      refreshSitefold();
+      setTitleEditing(false);
+    } catch (e) {
+      setTitleError(e instanceof Error ? e.message : "Could not save title");
+    } finally {
+      setSavingTitle(false);
+    }
+  }
+
   function openEdit(punch: Punch) {
     setEditing(punch);
     setEditIn(toDatetimeLocalValue(punch.punchedInAt));
@@ -246,9 +275,20 @@ export default function JobPage({
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {contact.name}
           </p>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
-            {job.title}
-          </h1>
+          <div className="flex items-start gap-1">
+            <h1 className="min-w-0 flex-1 font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+              {job.title}
+            </h1>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={openTitleEdit}
+              aria-label="Edit job title"
+              className="shrink-0"
+            >
+              <Pencil className="h-4 w-4 text-[oklch(0.4_0.04_155)]" />
+            </Button>
+          </div>
           <div className="mt-1 flex items-center gap-2">
             <Badge variant={job.status === "open" ? "default" : "secondary"}>
               {job.status}
@@ -267,6 +307,58 @@ export default function JobPage({
           <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
       </div>
+
+      <Dialog
+        open={titleEditing}
+        onOpenChange={(open) => {
+          if (!open && !savingTitle) setTitleEditing(false);
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit job title</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="job-title">Title</Label>
+            <Input
+              id="job-title"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              className="bg-white/70"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void saveTitle();
+                }
+              }}
+            />
+            {titleError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {titleError}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={savingTitle}
+              onClick={() => setTitleEditing(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void saveTitle()}
+              disabled={savingTitle}
+              className="bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] hover:bg-[oklch(0.28_0.05_155)]"
+            >
+              {savingTitle ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <section className="rounded-[1.5rem] bg-[oklch(0.32_0.05_155)] p-5 text-[oklch(0.97_0.02_95)] shadow-sm">
         <p className="text-sm text-[oklch(0.9_0.03_95_/0.8)]">Time clock</p>

@@ -395,6 +395,15 @@ export async function addPhoto(jobId: string, blob: Blob, caption = "") {
   return photo;
 }
 
+export async function updatePhotoCaption(photoId: string, caption: string) {
+  const db = await getDb();
+  const photo = await db.get("photos", photoId);
+  if (!photo) throw new Error("Photo not found.");
+  const next: Photo = { ...photo, caption: caption.trim() };
+  await db.put("photos", next);
+  return next;
+}
+
 export async function deletePhoto(photoId: string) {
   await (await getDb()).delete("photos", photoId);
 }

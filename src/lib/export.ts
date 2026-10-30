@@ -9,16 +9,26 @@ import {
 import type { Contact, DayNote, Job, Photo, Punch } from "./types";
 import { durationMinutes, formatDateTime, hoursFromMinutes, todayKey } from "./time";
 
+export type ExportFilters = {
+  contactId?: string | null;
+  jobId?: string | null;
+};
+
 export type ExportRow = {
   date: string;
   contact: string;
+  phone: string;
+  email: string;
+  address: string;
   job: string;
   jobId: string;
   punchedIn: string;
   punchedOut: string;
   hours: string;
+  /** Billed minutes — 0 for open punches (excluded from totals). */
   minutes: number;
   dayNote: string;
+  isOpen: boolean;
 };
 
 export type JobNoteRow = {
@@ -59,19 +69,39 @@ function extensionForBlob(blob: Blob) {
   return "jpg";
 }
 
+function punchesInRange(
+  punches: Punch[],
+  from: string,
+  to: string,
+  filters: ExportFilters = {},
+  jobs: Job[] = [],
+): Punch[] {
+  const fromDate = startOfDay(parseISO(`${from}T12:00:00`));
+  const toDate = endOfDay(parseISO(`${to}T12:00:00`));
+  const jobMap = new Map(jobs.map((j) => [j.id, j]));
+
+  return punches.filter((p) => {
+    const d = parseISO(p.punchedInAt);
+    if (!isWithinInterval(d, { start: fromDate, end: toDate })) return false;
+    if (filters.jobId && p.jobId !== filters.jobId) return false;
+    if (filters.contactId) {
+      const job = jobMap.get(p.jobId);
+      if (!job || job.contactId !== filters.contactId) return false;
+    }
+    return true;
+  });
+}
+
 export function jobIdsInPunchRange(
   punches: Punch[],
   from: string,
   to: string,
+  filters: ExportFilters = {},
+  jobs: Job[] = [],
 ): Set<string> {
-  const fromDate = startOfDay(parseISO(`${from}T12:00:00`));
-  const toDate = endOfDay(parseISO(`${to}T12:00:00`));
   const ids = new Set<string>();
-  for (const p of punches) {
-    const d = parseISO(p.punchedInAt);
-    if (isWithinInterval(d, { start: fromDate, end: toDate })) {
-      ids.add(p.jobId);
-    }
+  for (const p of punchesInRange(punches, from, to, filters, jobs)) {
+    ids.add(p.jobId);
   }
   return ids;
 }
@@ -83,18 +113,18 @@ export function buildExportRows(args: {
   dayNotes: DayNote[];
   from: string;
   to: string;
+  contactId?: string | null;
+  jobId?: string | null;
 }): ExportRow[] {
-  const fromDate = startOfDay(parseISO(`${args.from}T12:00:00`));
-  const toDate = endOfDay(parseISO(`${args.to}T12:00:00`));
+  const filters: ExportFilters = {
+    contactId: args.contactId,
+    jobId: args.jobId,
+  };
   const jobMap = new Map(args.jobs.map((j) => [j.id, j]));
   const contactMap = new Map(args.contacts.map((c) => [c.id, c]));
   const noteMap = new Map(args.dayNotes.map((n) => [n.date, n.body]));
 
-  return args.punches
-    .filter((p) => {
-      const d = parseISO(p.punchedInAt);
-      return isWithinInterval(d, { start: fromDate, end: toDate });
-    })
+  return punchesInRange(args.punches, args.from, args.to, filters, args.jobs)
     .sort(
       (a, b) =>
         new Date(a.punchedInAt).getTime() - new Date(b.punchedInAt).getTime(),
@@ -103,19 +133,25 @@ export function buildExportRows(args: {
       const job = jobMap.get(p.jobId);
       const contact = job ? contactMap.get(job.contactId) : undefined;
       const date = format(parseISO(p.punchedInAt), "yyyy-MM-dd");
-      const minutes = durationMinutes(p.punchedInAt, p.punchedOutAt);
+      const isOpen = p.punchedOutAt === null;
+      // Open punches stay listed as "Still open" but do not inflate billed hours.
+      const minutes = isOpen
+        ? 0
+        : durationMinutes(p.punchedInAt, p.punchedOutAt);
       return {
         date,
         contact: contact?.name ?? "Unknown",
+        phone: contact?.phone ?? "",
+        email: contact?.email ?? "",
+        address: contact?.address ?? "",
         job: job?.title ?? "Unknown job",
         jobId: p.jobId,
         punchedIn: formatDateTime(p.punchedInAt),
-        punchedOut: p.punchedOutAt
-          ? formatDateTime(p.punchedOutAt)
-          : "Still open",
-        hours: hoursFromMinutes(minutes),
+        punchedOut: isOpen ? "Still open" : formatDateTime(p.punchedOutAt!),
+        hours: isOpen ? "—" : hoursFromMinutes(minutes),
         minutes,
         dayNote: noteMap.get(date) ?? "",
+        isOpen,
       };
     });
 }
@@ -127,12 +163,29 @@ export function buildJobNoteRows(args: {
   contacts: Contact[];
   from: string;
   to: string;
+  contactId?: string | null;
+  jobId?: string | null;
 }): JobNoteRow[] {
-  const jobIds = jobIdsInPunchRange(args.punches, args.from, args.to);
+  const filters: ExportFilters = {
+    contactId: args.contactId,
+    jobId: args.jobId,
+  };
+  const jobIds = jobIdsInPunchRange(
+    args.punches,
+    args.from,
+    args.to,
+    filters,
+    args.jobs,
+  );
   const contactMap = new Map(args.contacts.map((c) => [c.id, c]));
 
   return args.jobs
-    .filter((j) => jobIds.has(j.id) && j.notes.trim())
+    .filter((j) => {
+      if (!jobIds.has(j.id) || !j.notes.trim()) return false;
+      if (filters.jobId && j.id !== filters.jobId) return false;
+      if (filters.contactId && j.contactId !== filters.contactId) return false;
+      return true;
+    })
     .map((job) => {
       const contact = contactMap.get(job.contactId);
       return {
@@ -159,8 +212,20 @@ export function buildPhotoExportItems(args: {
   photos: Photo[];
   from: string;
   to: string;
+  contactId?: string | null;
+  jobId?: string | null;
 }): PhotoExportItem[] {
-  const jobIds = jobIdsInPunchRange(args.punches, args.from, args.to);
+  const filters: ExportFilters = {
+    contactId: args.contactId,
+    jobId: args.jobId,
+  };
+  const jobIds = jobIdsInPunchRange(
+    args.punches,
+    args.from,
+    args.to,
+    filters,
+    args.jobs,
+  );
   const jobMap = new Map(args.jobs.map((j) => [j.id, j]));
   const contactMap = new Map(args.contacts.map((c) => [c.id, c]));
 
@@ -181,7 +246,10 @@ export function buildPhotoExportItems(args: {
     const key = `${photo.jobId}:${date}`;
     const n = (counters.get(key) ?? 0) + 1;
     counters.set(key, n);
-    const filename = `photos/${date}_${sanitizeFilenamePart(contactName)}_${sanitizeFilenamePart(jobTitle)}_${String(n).padStart(2, "0")}.${extensionForBlob(photo.blob)}`;
+    const captionPart = photo.caption.trim()
+      ? `_${sanitizeFilenamePart(photo.caption)}`
+      : "";
+    const filename = `photos/${date}_${sanitizeFilenamePart(contactName)}_${sanitizeFilenamePart(jobTitle)}${captionPart}_${String(n).padStart(2, "0")}.${extensionForBlob(photo.blob)}`;
     return {
       photo,
       jobId: photo.jobId,
@@ -208,17 +276,36 @@ export function rowsToCsv(
   to: string,
   jobNotes: JobNoteRow[] = [],
   photos: PhotoExportItem[] = [],
+  options?: {
+    contact?: Contact | null;
+    filterLabel?: string;
+  },
 ) {
   const lines: string[] = [];
   lines.push("Time clock export");
   lines.push(`Range,${from},${to}`);
+  if (options?.filterLabel) {
+    lines.push(`Filter,${options.filterLabel}`);
+  }
+  if (options?.contact) {
+    const c = options.contact;
+    lines.push(`Client,${csvEscape(c.name)}`);
+    if (c.phone) lines.push(`Phone,${csvEscape(c.phone)}`);
+    if (c.email) lines.push(`Email,${csvEscape(c.email)}`);
+    if (c.address) lines.push(`Address,${csvEscape(c.address)}`);
+  }
   lines.push("");
-  lines.push("Date,Contact,Job,Punch In,Punch Out,Hours,Day Note");
+  lines.push(
+    "Date,Contact,Phone,Email,Address,Job,Punch In,Punch Out,Hours,Day Note",
+  );
   for (const row of rows) {
     lines.push(
       [
         row.date,
         row.contact,
+        row.phone,
+        row.email,
+        row.address,
         row.job,
         row.punchedIn,
         row.punchedOut,
@@ -266,8 +353,14 @@ export function rowsToCsv(
   }
 
   const totalMins = rows.reduce((sum, r) => sum + r.minutes, 0);
+  const openCount = rows.filter((r) => r.isOpen).length;
   lines.push("");
-  lines.push(`Total hours,${hoursFromMinutes(totalMins)}`);
+  lines.push(`Total hours (closed punches),${hoursFromMinutes(totalMins)}`);
+  if (openCount > 0) {
+    lines.push(
+      `Open punches excluded from total,${openCount}`,
+    );
+  }
   lines.push(`Photo count,${photos.length}`);
   return lines.join("\n");
 }
@@ -316,15 +409,17 @@ export async function downloadThisWeekCsv(load: {
 export function summarizeByDay(rows: ExportRow[]) {
   const map = new Map<
     string,
-    { minutes: number; note: string; entries: ExportRow[] }
+    { minutes: number; note: string; entries: ExportRow[]; openCount: number }
   >();
   for (const row of rows) {
     const existing = map.get(row.date) ?? {
       minutes: 0,
       note: row.dayNote,
       entries: [],
+      openCount: 0,
     };
     existing.minutes += row.minutes;
+    if (row.isOpen) existing.openCount += 1;
     existing.note = existing.note || row.dayNote;
     existing.entries.push(row);
     map.set(row.date, existing);
@@ -487,4 +582,11 @@ export async function buildExportPackageZip(args: {
     files.push({ name: item.filename, data: item.photo.blob });
   }
   return buildZipBlob(files);
+}
+
+/** Google Maps directions / search URL for a street address. */
+export function mapsDirectionsUrl(address: string) {
+  const q = address.trim();
+  if (!q) return null;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}`;
 }
