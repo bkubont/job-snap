@@ -61,7 +61,7 @@ export default function NotesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
           Day notes
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -133,7 +133,7 @@ export default function NotesPage() {
                 <li key={job.id}>
                   <Link
                     href={`/jobs/${job.id}?tab=notes`}
-                    className="block rounded-2xl bg-white/70 px-4 py-3 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
+                    className="block rounded-2xl bg-white/70 px-4 py-3 ring-1 ring-hairline transition hover:bg-white"
                   >
                     <p className="text-sm font-medium">
                       {job.title}{" "}
@@ -176,7 +176,7 @@ export default function NotesPage() {
                 <button
                   type="button"
                   onClick={() => setPicked(n.date)}
-                  className="w-full rounded-2xl bg-white/70 px-4 py-3 text-left ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
+                  className="w-full rounded-2xl bg-white/70 px-4 py-3 text-left ring-1 ring-hairline transition hover:bg-white"
                 >
                   <p className="text-xs font-medium text-muted-foreground">
                     {formatDay(n.date)}

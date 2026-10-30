@@ -6,6 +6,13 @@
 
 @theme inline {
   --color-background: var(--background);
+  /* Job Snap tokens */
+  --color-ink: var(--ink);
+  --color-clock: var(--clock);
+  --color-clock-hover: var(--clock-hover);
+  --color-clock-foreground: var(--clock-foreground);
+  --color-hairline: var(--hairline);
+  --color-placeholder-line: var(--placeholder-line);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-heading: var(--font-heading);
@@ -49,6 +56,15 @@
 }
 
 :root {
+  /* Headings and emphasised text */
+  --ink: oklch(0.28 0.04 155);
+  /* Clock in/out — the app's one bright accent */
+  --clock: oklch(0.82 0.12 75);
+  --clock-hover: oklch(0.78 0.12 75);
+  --clock-foreground: oklch(0.25 0.04 155);
+  /* Card outlines and dashed empty-state borders */
+  --hairline: oklch(0.35 0.03 155 / 0.08);
+  --placeholder-line: oklch(0.45 0.04 155 / 0.35);
   --background: oklch(0.965 0.012 95);
   --foreground: oklch(0.24 0.03 155);
   --card: oklch(0.985 0.006 95);

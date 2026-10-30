@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { format, startOfMonth, subDays } from "date-fns";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useToday } from "@/hooks/use-sitefold";
+import { format, parseISO, startOfMonth, subDays } from "date-fns";
 import {
   Download,
   FileText,
@@ -53,14 +54,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
-  const [url, setUrl] = useState<string | null>(null);
+const noopSubscribe = () => () => {};
 
-  useEffect(() => {
-    const objectUrl = URL.createObjectURL(item.photo.blob);
-    setUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [item.photo.blob]);
+function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
+  const url = useMemo(() => URL.createObjectURL(item.photo.blob), [item.photo.blob]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
 
   return (
     <figure className="overflow-hidden rounded-xl bg-[oklch(0.92_0.01_95)] print:break-inside-avoid">
@@ -77,7 +75,7 @@ function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
       <figcaption className="space-y-0.5 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground">
         <span className="block tabular-nums">{item.date}</span>
         {item.caption ? (
-          <span className="block text-[oklch(0.28_0.04_155)]">{item.caption}</span>
+          <span className="block text-ink">{item.caption}</span>
         ) : null}
       </figcaption>
     </figure>
@@ -86,8 +84,14 @@ function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
 
 export default function ExportPage() {
   const settings = useSettings();
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  // Defaults (start of this month → today) need the clock, so they're derived
+  // in the browser; only dates the user picks are stored.
+  const today = useToday();
+  const [fromInput, setFrom] = useState<string | null>(null);
+  const [toInput, setTo] = useState<string | null>(null);
+  const from =
+    fromInput ?? (today ? format(startOfMonth(parseISO(`${today}T12:00:00`)), "yyyy-MM-dd") : "");
+  const to = toInput ?? today ?? "";
   const [contactId, setContactId] = useState("");
   const [jobId, setJobId] = useState("");
   const [punches, setPunches] = useState<Punch[]>([]);
@@ -104,7 +108,9 @@ export default function ExportPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
-  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const storedLastBackup = useSyncExternalStore(noopSubscribe, getLastBackupAt, () => null);
+  const [newLastBackup, setLastBackupAt] = useState<string | null>(null);
+  const lastBackupAt = newLastBackup ?? storedLastBackup;
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -112,13 +118,6 @@ export default function ExportPage() {
     ReturnType<typeof getStorageStatus>
   > | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const end = new Date();
-    setFrom(format(startOfMonth(end), "yyyy-MM-dd"));
-    setTo(todayKey());
-    setLastBackupAt(getLastBackupAt());
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,7 +346,9 @@ export default function ExportPage() {
       await restoreFullBackup(pendingFile);
       setRestoreOpen(false);
       setPendingFile(null);
-      // Full reload so every screen picks up replaced IndexedDB data
+      // Full reload (not router.push) so every screen and cached hook
+      // re-reads the replaced IndexedDB data.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.assign("/export#full-backup");
     } catch (err) {
       setBackupError(
@@ -380,7 +381,7 @@ export default function ExportPage() {
   return (
     <div className="space-y-6">
       <div className="print:hidden">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
           Export
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -415,7 +416,7 @@ export default function ExportPage() {
         </p>
       ) : null}
 
-      <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:hidden">
+      <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-hairline print:hidden">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="from">From</Label>
@@ -446,7 +447,7 @@ export default function ExportPage() {
                 setContactId(e.target.value);
                 setJobId("");
               }}
-              className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="flex h-11 w-full rounded-lg border border-input bg-white/70 px-3 py-1 text-base md:h-9 md:text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <option value="">All contacts</option>
               {contacts.map((c) => (
@@ -462,7 +463,7 @@ export default function ExportPage() {
               id="export-job"
               value={jobId}
               onChange={(e) => setJobId(e.target.value)}
-              className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="flex h-11 w-full rounded-lg border border-input bg-white/70 px-3 py-1 text-base md:h-9 md:text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             >
               <option value="">All jobs</option>
               {jobsForFilter.map((j) => (
@@ -538,10 +539,10 @@ export default function ExportPage() {
 
       <section
         id="full-backup"
-        className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:hidden scroll-mt-28"
+        className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-hairline print:hidden scroll-mt-28"
       >
         <div>
-          <h2 className="font-heading text-lg font-semibold text-[oklch(0.28_0.04_155)]">
+          <h2 className="font-heading text-lg font-semibold text-ink">
             Full backup
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -685,8 +686,8 @@ export default function ExportPage() {
         </div>
 
         {selectedContact ? (
-          <div className="rounded-2xl bg-white/80 px-4 py-3 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:break-inside-avoid">
-            <p className="font-heading font-semibold text-[oklch(0.28_0.04_155)]">
+          <div className="rounded-2xl bg-white/80 px-4 py-3 text-sm ring-1 ring-hairline print:break-inside-avoid">
+            <p className="font-heading font-semibold text-ink">
               {selectedContact.name}
             </p>
             <ul className="mt-1 space-y-0.5 text-muted-foreground">
@@ -737,7 +738,7 @@ export default function ExportPage() {
             {byDay.map((day) => (
               <article
                 key={day.date}
-                className="rounded-2xl bg-white/80 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:break-inside-avoid"
+                className="rounded-2xl bg-white/80 p-4 ring-1 ring-hairline print:break-inside-avoid"
               >
                 <header className="mb-3 flex items-baseline justify-between gap-2 border-b border-[oklch(0.35_0.03_155_/0.1)] pb-2">
                   <h3 className="font-heading font-semibold">
@@ -788,7 +789,7 @@ export default function ExportPage() {
             ))}
 
             {jobNotes.length > 0 ? (
-              <article className="rounded-2xl bg-white/80 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:break-inside-avoid">
+              <article className="rounded-2xl bg-white/80 p-4 ring-1 ring-hairline print:break-inside-avoid">
                 <header className="mb-3 border-b border-[oklch(0.35_0.03_155_/0.1)] pb-2">
                   <h3 className="font-heading font-semibold">Job notes</h3>
                   <p className="text-xs text-muted-foreground">
@@ -815,7 +816,7 @@ export default function ExportPage() {
             ) : null}
 
             {photoGroups.length > 0 ? (
-              <article className="rounded-2xl bg-white/80 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+              <article className="rounded-2xl bg-white/80 p-4 ring-1 ring-hairline">
                 <header className="mb-3 border-b border-[oklch(0.35_0.03_155_/0.1)] pb-2">
                   <h3 className="font-heading font-semibold">Photos</h3>
                   <p className="text-xs text-muted-foreground">

@@ -40,7 +40,11 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright smoke covers Continue / Switch / Reopen, Today’s note, punch edit, export ZIP, invoice PDF download (with rate), and backup round-trip. `e2e/reliability.spec.ts` adds regression tests for exact hour totals, punch-edit precision, simultaneous punch-ins, notes autosave without blur, storage-failure screens, server-rendered Notes, and a byte-exact photo backup/restore (see `docs/AUDIT.md`). There is no GitHub Actions workflow in this repo yet — run e2e locally (or in CI after adding a workflow).
+- `e2e/smoke.spec.ts` — the handoff's required 15-step scenario (customer → jobs → time → photos → notes → status → reload → exports → backup → isolated restore).
+- `e2e/reliability.spec.ts` — one regression test per fixed defect, plus statuses, rounding, backup fidelity, confirmations and touch-target size.
+- `e2e/conditions.spec.ts` — 320 px screens, slow 3G, offline, storage full mid-upload, damaged backup, bad import file.
+
+See `docs/HANDOFF.md` for the deliverables summary and the real-device checklist, and `docs/AUDIT.md` for the full audit trail.
 
 ## Notes
 

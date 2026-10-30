@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm, errorMessage, notify } from "@/components/feedback";
 import {
   Suspense,
   useEffect,
@@ -169,10 +170,11 @@ export default function ContactsPage() {
         picked.map((p) => ({ ...p, address: "", notes: "" })),
       );
     } catch (e) {
-      alert(
-        e instanceof Error
-          ? e.message
-          : "Could not open your phone contacts. Import a .vcf file or add a contact manually.",
+      notify.error(
+        errorMessage(
+          e,
+          "Could not open your phone contacts. Import a .vcf file or add a contact manually.",
+        ),
       );
     }
   }
@@ -190,7 +192,7 @@ export default function ContactsPage() {
         file.type,
       );
       if (!parsed.length) {
-        alert(
+        notify.error(
           kind === "csv"
             ? "No contacts found. A CSV needs a name column (phone, email and address are optional)."
             : "No contacts found in that file. Export contacts as .vcf (see the steps on this page) or use a CSV with name/phone/email/address headers.",
@@ -199,7 +201,7 @@ export default function ContactsPage() {
       }
       startReview(file.name, parsed);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not read that file.");
+      notify.error(errorMessage(e, "Could not read that file."));
     } finally {
       setReadingFile(false);
     }
@@ -248,12 +250,14 @@ export default function ContactsPage() {
     const dupes = findPossibleDuplicates(form, contacts);
     if (
       dupes.length &&
-      !confirm(
-        `Possible duplicate of ${dupes
+      !(await askConfirm({
+        title: "Possible duplicate",
+        body: `Looks like ${dupes
           .slice(0, 3)
           .map((d) => d.name + (d.phone ? ` (${d.phone})` : ""))
           .join(", ")}. Create a separate contact anyway?`,
-      )
+        confirmLabel: "Create anyway",
+      }))
     ) {
       return;
     }
@@ -271,10 +275,9 @@ export default function ContactsPage() {
       setShowMore(false);
       setOpen(false);
       refreshSitefold();
+      notify.success(`${form.name.trim()} added.`);
     } catch (err) {
-      alert(
-        err instanceof Error ? `Contact not saved: ${err.message}` : "Contact not saved.",
-      );
+      notify.error(`Contact not saved. ${errorMessage(err, "")}`.trim());
     } finally {
       setCreating(false);
     }
@@ -300,7 +303,7 @@ export default function ContactsPage() {
 
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
             Contacts
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -317,7 +320,7 @@ export default function ContactsPage() {
 
       <section
         id="import"
-        className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+        className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-hairline"
       >
         <div className="flex flex-wrap gap-2">
           <Button
@@ -374,7 +377,7 @@ export default function ContactsPage() {
       ) : loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : contacts.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] bg-white/50 px-5 py-10 text-center">
+        <div className="rounded-2xl border border-dashed border-placeholder-line bg-white/50 px-5 py-10 text-center">
           <ContactRound className="mx-auto h-8 w-8 text-[oklch(0.45_0.05_155)]" />
           <p className="mt-3 font-medium">No contacts yet</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -382,7 +385,7 @@ export default function ContactsPage() {
           </p>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] px-4 py-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border border-dashed border-placeholder-line px-4 py-8 text-center text-sm text-muted-foreground">
           No contacts match “{query.trim()}”.
         </p>
       ) : (
@@ -401,7 +404,7 @@ export default function ContactsPage() {
               <li key={c.id}>
                 <Link
                   href={`/contacts/${c.id}`}
-                  className="flex min-h-14 items-center gap-3 rounded-2xl bg-white/70 px-3.5 py-3 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
+                  className="flex min-h-14 items-center gap-3 rounded-2xl bg-white/70 px-3.5 py-3 shadow-sm ring-1 ring-hairline transition hover:bg-white"
                 >
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[oklch(0.93_0.02_95)] text-sm font-semibold text-[oklch(0.35_0.05_155)]">
                     {initials(c.name)}

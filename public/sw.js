@@ -1,5 +1,5 @@
 /* Job Snap service worker — caches app shell only, never IndexedDB user data. */
-const CACHE_NAME = "job-snap-shell-v3";
+const CACHE_NAME = "job-snap-shell-v4";
 // On a weak signal, don't wait forever for the network before showing the
 // cached screen (the fetch keeps going and refreshes the cache).
 const NAVIGATION_TIMEOUT_MS = 4000;
@@ -63,10 +63,58 @@ function shouldBypass(request, url) {
   return false;
 }
 
+/**
+ * Next.js fetches route data ("RSC" requests, ?_rsc=<token>) for dynamic pages
+ * and in-app navigation. Cache them under a stable key (token removed, router
+ * prefetch headers kept) so job and contact pages work offline after a visit.
+ */
+function isRscRequest(request, url) {
+  return request.headers.get("RSC") === "1" || url.searchParams.has("_rsc");
+}
+
+function rscCacheKey(request, url) {
+  const key = new URL(url.href);
+  key.searchParams.delete("_rsc");
+  const variant = ["next-router-prefetch", "next-router-segment-prefetch"]
+    .map((h) => request.headers.get(h) || "")
+    .join("|");
+  key.searchParams.set("__sw_rsc", variant);
+  return key.href;
+}
+
+/** Network first; after a timeout (or offline) use the cached copy if any. */
+async function networkFirst(event, request, cacheKey) {
+  const cache = await caches.open(CACHE_NAME);
+  const network = fetch(request).then(async (fresh) => {
+    if (fresh.ok) await cache.put(cacheKey, fresh.clone());
+    return fresh;
+  });
+  event.waitUntil(network.catch(() => {}));
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const timeout = new Promise((resolve) =>
+      setTimeout(() => resolve(null), NAVIGATION_TIMEOUT_MS),
+    );
+    try {
+      const winner = await Promise.race([network, timeout]);
+      if (winner) return winner;
+    } catch {
+      /* offline */
+    }
+    return cached;
+  }
+  return network;
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
   if (shouldBypass(request, url)) return;
+
+  if (isRscRequest(request, url)) {
+    event.respondWith(networkFirst(event, request, rscCacheKey(request, url)));
+    return;
+  }
 
   // Navigations: network first, fall back to cached shell
   if (request.mode === "navigate") {

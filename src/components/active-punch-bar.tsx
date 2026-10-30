@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage, notify } from "@/components/feedback";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useActivePunch } from "@/hooks/use-sitefold";
@@ -33,14 +34,14 @@ export function ActivePunchBar({ compact = false }: { compact?: boolean }) {
       await punchOut(active!.punch.id);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not clock out");
+      notify.error(errorMessage(e, "Could not clock out"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="border-t border-[oklch(0.55_0.12_75_/0.25)] bg-[oklch(0.42_0.08_155)] px-4 py-2.5 text-[oklch(0.97_0.02_95)]">
+    <div className="border-t border-[oklch(0.55_0.12_75_/0.25)] bg-[oklch(0.42_0.08_155)] px-4 py-2.5 text-primary-foreground">
       {compact ? null : (
       <div className="mx-auto flex max-w-lg items-center gap-3">
         <span className="relative flex h-2.5 w-2.5 shrink-0">
@@ -63,7 +64,7 @@ export function ActivePunchBar({ compact = false }: { compact?: boolean }) {
           variant="secondary"
           disabled={busy}
           onClick={onPunchOut}
-          className="shrink-0 bg-[oklch(0.92_0.04_85)] text-[oklch(0.28_0.04_155)] hover:bg-white"
+          className="shrink-0 bg-[oklch(0.92_0.04_85)] text-ink hover:bg-white"
         >
           Clock out
         </Button>
@@ -72,7 +73,7 @@ export function ActivePunchBar({ compact = false }: { compact?: boolean }) {
       {extras.length > 0 ? (
         <div
           role="alert"
-          className="mx-auto mt-2 max-w-lg rounded-lg bg-[oklch(0.93_0.05_75)] px-3 py-2 text-xs text-[oklch(0.28_0.04_155)]"
+          className="mx-auto mt-2 max-w-lg rounded-lg bg-[oklch(0.93_0.05_75)] px-3 py-2 text-xs text-ink"
         >
           <p className="font-semibold">
             {extras.length + 1} timers are running at once.

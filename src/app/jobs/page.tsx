@@ -86,7 +86,7 @@ function JobsList() {
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-3">
         <div>
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
             Jobs
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -122,9 +122,9 @@ function JobsList() {
             aria-pressed={filter === f.value}
             onClick={() => setFilter(f.value)}
             className={cn(
-              "h-9 shrink-0 rounded-full px-3.5 text-sm font-medium ring-1 transition",
+              "h-9 pointer-coarse:h-10 shrink-0 rounded-full px-3.5 text-sm font-medium ring-1 transition",
               filter === f.value
-                ? "bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] ring-transparent"
+                ? "bg-primary text-primary-foreground ring-transparent"
                 : "bg-white/70 text-foreground ring-[oklch(0.35_0.03_155_/0.15)]",
             )}
           >
@@ -138,7 +138,7 @@ function JobsList() {
       ) : loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : overviews.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] bg-white/50 px-5 py-10 text-center">
+        <div className="rounded-2xl border border-dashed border-placeholder-line bg-white/50 px-5 py-10 text-center">
           <Briefcase className="mx-auto h-8 w-8 text-[oklch(0.45_0.05_155)]" />
           <p className="mt-3 font-medium">No jobs yet</p>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -146,7 +146,7 @@ function JobsList() {
           </p>
         </div>
       ) : list.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] px-4 py-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border border-dashed border-placeholder-line px-4 py-8 text-center text-sm text-muted-foreground">
           No jobs match.{" "}
           {filter !== "all" ? (
             <button
@@ -163,7 +163,7 @@ function JobsList() {
           {list.map(({ job, contact, totalMinutes, photoCount, isActive, lastActivityAt }) => (
             <li
               key={job.id}
-              className="relative rounded-2xl bg-white/70 px-3.5 py-3 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+              className="relative rounded-2xl bg-white/70 px-3.5 py-3 shadow-sm ring-1 ring-hairline"
             >
               <div className="flex items-start gap-2">
                 <Link

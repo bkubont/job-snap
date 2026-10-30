@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Download, Share, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,9 +13,18 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
+const noopSubscribe = () => () => {};
+
+function detectIos() {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
 export function InstallPrompt() {
   const [visible, setVisible] = useState(false);
-  const [isIos, setIsIos] = useState(false);
+  const isIos = useSyncExternalStore(noopSubscribe, detectIos, () => false);
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
     null,
   );
@@ -31,10 +40,7 @@ export function InstallPrompt() {
         (navigator as Navigator & { standalone?: boolean }).standalone === true);
     if (standalone) return;
 
-    const ios =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    setIsIos(ios);
+    const ios = detectIos();
 
     const onBip = (event: Event) => {
       event.preventDefault();
@@ -78,7 +84,7 @@ export function InstallPrompt() {
   return (
     <div className="border-b border-[oklch(0.35_0.03_155_/0.12)] bg-[oklch(0.94_0.03_85_/0.95)] px-4 py-2 print:hidden">
       <div className="mx-auto flex max-w-lg items-start gap-2">
-        <div className="min-w-0 flex-1 text-xs leading-snug text-[oklch(0.28_0.04_155)]">
+        <div className="min-w-0 flex-1 text-xs leading-snug text-ink">
           {deferred ? (
             <>
               <span className="font-medium">Install Job Snap</span>

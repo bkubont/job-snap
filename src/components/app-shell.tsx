@@ -16,6 +16,7 @@ import { ActivePunchBar } from "@/components/active-punch-bar";
 import { BackupNudge } from "@/components/backup-nudge";
 import { InstallPrompt } from "@/components/install-prompt";
 import { PwaRegister } from "@/components/pwa-register";
+import { FeedbackHost } from "@/components/feedback";
 
 /** `match` lists the path prefixes that light up each tab. */
 const nav = [
@@ -35,6 +36,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex min-h-full flex-col">
       <PwaRegister />
+      <FeedbackHost />
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-[oklch(0.72_0.12_75_/0.18)] blur-3xl" />
         <div className="pointer-events-none absolute -right-16 top-40 h-80 w-80 rounded-full bg-[oklch(0.45_0.06_155_/0.2)] blur-3xl" />
@@ -50,11 +52,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-30 border-b border-[oklch(0.35_0.03_155_/0.15)] bg-[oklch(0.97_0.01_95_/0.85)] backdrop-blur-md">
         <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-4 py-3">
           <Link href="/" className="group flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[oklch(0.32_0.05_155)] text-[oklch(0.92_0.04_85)] shadow-sm transition-transform group-hover:scale-105">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-[oklch(0.92_0.04_85)] shadow-sm transition-transform group-hover:scale-105">
               <Clock className="h-4.5 w-4.5" strokeWidth={2.25} />
             </span>
             <div className="leading-tight">
-              <p className="font-heading text-lg font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+              <p className="font-heading text-lg font-semibold tracking-tight text-ink">
                 Job Snap
               </p>
               <p className="text-[11px] text-muted-foreground">

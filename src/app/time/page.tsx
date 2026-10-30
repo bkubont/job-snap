@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage, notify } from "@/components/feedback";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { addDays, format, isSameDay, parseISO } from "date-fns";
@@ -56,7 +57,7 @@ export default function TimePage() {
         format(range.end, "yyyy-MM-dd"),
       );
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not create CSV");
+      notify.error(errorMessage(e, "Could not create CSV"));
     } finally {
       setCsvBusy(false);
     }
@@ -65,7 +66,7 @@ export default function TimePage() {
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
           Time
         </h1>
         <Button onClick={() => setManualOpen(true)} disabled={!jobs.length}>
@@ -111,14 +112,14 @@ export default function TimePage() {
       ) : null}
 
       <section className="grid grid-cols-2 gap-2">
-        <div className="rounded-2xl bg-[oklch(0.32_0.05_155)] px-4 py-3 text-[oklch(0.97_0.02_95)]">
+        <div className="rounded-2xl bg-primary px-4 py-3 text-primary-foreground">
           <p className="text-xs opacity-80">Week total</p>
           <p className="font-heading text-2xl font-semibold tabular-nums">
             {hoursFromMinutes(weekTotal)} h
           </p>
           <p className="text-xs opacity-70 tabular-nums">{formatMinutes(weekTotal)}</p>
         </div>
-        <div className="rounded-2xl bg-white/70 px-4 py-3 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+        <div className="rounded-2xl bg-white/70 px-4 py-3 ring-1 ring-hairline">
           <p className="text-xs text-muted-foreground">
             {weekOffset === 0 ? "Today" : "Entries"}
           </p>
@@ -142,7 +143,7 @@ export default function TimePage() {
           {perJob.length > 0 ? (
             <section className="space-y-2">
               <h2 className="font-heading text-lg font-semibold">By job</h2>
-              <ul className="divide-y divide-black/5 rounded-2xl bg-white/70 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+              <ul className="divide-y divide-black/5 rounded-2xl bg-white/70 ring-1 ring-hairline">
                 {perJob.map(([jobId, mins]) => {
                   const job = jobMap.get(jobId);
                   return (
@@ -195,7 +196,7 @@ export default function TimePage() {
                         <li key={p.id}>
                           <Link
                             href={`/jobs/${p.jobId}?tab=time`}
-                            className="flex min-h-12 items-center gap-3 rounded-xl bg-white/70 px-3.5 py-2.5 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+                            className="flex min-h-12 items-center gap-3 rounded-xl bg-white/70 px-3.5 py-2.5 text-sm ring-1 ring-hairline"
                           >
                             <span className="w-[4.5rem] shrink-0 text-xs leading-snug tabular-nums text-muted-foreground">
                               <span className="block">{formatClock(p.punchedInAt)}</span>
@@ -225,7 +226,7 @@ export default function TimePage() {
             ))}
           </section>
 
-          <div className="space-y-2 rounded-2xl bg-white/70 p-4 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+          <div className="space-y-2 rounded-2xl bg-white/70 p-4 text-sm ring-1 ring-hairline">
             <Button
               variant="outline"
               className="w-full"
