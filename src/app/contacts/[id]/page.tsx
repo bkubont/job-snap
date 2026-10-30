@@ -25,9 +25,10 @@ import {
   createJob,
   deleteContact,
   updateContact,
-  updateJob,
+  updateJobFields,
   switchPunchToJob,
 } from "@/lib/db";
+import { LoadError } from "@/components/load-error";
 import { mapsDirectionsUrl } from "@/lib/export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +92,7 @@ export default function ContactPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { contact, jobs } = useContact(id);
+  const { contact, jobs, error, retry } = useContact(id);
   const { active } = useActivePunch();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -115,7 +116,11 @@ export default function ContactPage({
   }, [contact, editing]);
 
   if (contact === undefined) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return error ? (
+      <LoadError error={error} onRetry={retry} what="this contact" />
+    ) : (
+      <p className="text-sm text-muted-foreground">Loading…</p>
+    );
   }
   if (contact === null) {
     return (
@@ -157,6 +162,8 @@ export default function ContactPage({
       setOpen(false);
       refreshSitefold();
       router.push(`/jobs/${job.id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not create job");
     } finally {
       setCreating(false);
     }
@@ -165,24 +172,35 @@ export default function ContactPage({
   async function onDelete() {
     if (
       !confirm(
-        `Delete ${contact!.name} and all jobs, punches, and photos inside?`,
+        `Delete ${contact!.name} and all ${jobs.length} job${
+          jobs.length === 1 ? "" : "s"
+        } inside, with every punch and photo? This can't be undone.`,
       )
     ) {
       return;
     }
-    await deleteContact(id);
-    refreshSitefold();
-    router.push("/");
+    try {
+      await deleteContact(id);
+      refreshSitefold();
+      router.push("/");
+    } catch (e) {
+      alert(
+        e instanceof Error
+          ? `Nothing was deleted: ${e.message}`
+          : "Nothing was deleted.",
+      );
+    }
   }
 
   async function toggleStatus(jobId: string, status: "open" | "closed") {
-    const job = jobs.find((j) => j.id === jobId);
-    if (!job) return;
-    await updateJob({
-      ...job,
-      status: status === "open" ? "closed" : "open",
-    });
-    refreshSitefold();
+    try {
+      await updateJobFields(jobId, {
+        status: status === "open" ? "closed" : "open",
+      });
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not change job status");
+    }
   }
 
   async function onQuickPunch(jobId: string) {

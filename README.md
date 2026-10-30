@@ -39,7 +39,7 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright smoke covers Continue / Switch / Reopen, Today’s note, punch edit, export ZIP, invoice PDF download (with rate), and backup round-trip. There is no GitHub Actions workflow in this repo yet — run e2e locally (or in CI after adding a workflow).
+Playwright smoke covers Continue / Switch / Reopen, Today’s note, punch edit, export ZIP, invoice PDF download (with rate), and backup round-trip. `e2e/reliability.spec.ts` adds regression tests for exact hour totals, punch-edit precision, simultaneous punch-ins, notes autosave without blur, storage-failure screens, server-rendered Notes, and a byte-exact photo backup/restore (see `docs/AUDIT.md`). There is no GitHub Actions workflow in this repo yet — run e2e locally (or in CI after adding a workflow).
 
 ## Notes
 

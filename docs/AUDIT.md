@@ -2,7 +2,7 @@
 
 Date: 2026-10-30 · Branch: `claude/job-snap-audit-improvements-rhch83` · Baseline commit: `9fce297`
 
-This is the Phase 1 report the handoff asks for. **No application code was changed.** Every finding marked *Confirmed* was reproduced against a local production build (`npm run build && npm run start`) with scripted headless Chromium. Each test ran in a throwaway browser profile.
+This is the Phase 1 report the handoff asks for. Phase 1 changed no application code; **Phase 2 repairs are recorded in [§8](#8-phase-2-status-functional-repairs)**. Every finding marked *Confirmed* was reproduced against a local production build (`npm run build && npm run start`) with scripted headless Chromium. Each test ran in a throwaway browser profile.
 
 ---
 
@@ -139,3 +139,33 @@ Expand the Playwright suite to run the handoff's 15-step scenario (two jobs, man
 - **The live site could not be reached** from this environment (the network policy blocks the host), so the audit is based on the source code at `9fce297`. If the deployed build differs from `main`, findings may differ.
 - **No real iPhone or Safari testing was possible.** Mobile behaviour was checked at phone viewport sizes in Chromium only. D9 and D10 are code-level risks that need a real device to confirm.
 - Running the Playwright suite in this container needs the preinstalled browser path (`launchOptions.executablePath`). The repo config itself is unchanged.
+
+---
+
+## 8. Phase 2 status (functional repairs)
+
+Every defect below was re-tested after the fix. `e2e/reliability.spec.ts` has a regression test for each one. **All 8 of those tests fail on the original code and pass now.** The existing smoke test still passes (10 of 10 tests pass in total).
+
+| # | Status | What changed |
+|---|---|---|
+| D1 | **Fixed** | Today's date is read only in the browser (`useToday`), so Notes pre-builds in full. The app-wide `<Suspense>` moved from around the whole app to around page content, with a separate boundary for the bottom nav. The header and nav are now in the first HTML on every page. Export's body still streams in after its scripts load because of its size, but the header and nav appear immediately. |
+| D2 | **Fixed** | Job notes and Today's note autosave 600 ms after typing stops, and save immediately when the page is hidden or closed, or when you navigate away (`useAutosave`). Each shows Saving… / Saved / "Not saved · Retry". Job notes are written with `updateJobFields`, which reads the latest copy of the job and writes it in one transaction, so a note can't overwrite a title or status changed elsewhere. |
+| D3 | **Fixed** | `durationMinutes` returns exact fractional minutes. Totals sum exact values and round only for display. Ten 59-second punches now show 0.16 h / 10m, where they used to show 0.00 / 0m. |
+| D4 | **Fixed** | A time field left unchanged keeps its original timestamp, seconds included. Only the field the user edited is rewritten. |
+| D5 | **Fixed** | `punchIn`, `switchPunchToJob` and `updatePunch` each check and write in **one** IndexedDB transaction, which the browser runs one at a time (across tabs too). If two timers are ever found running, from before this fix or from an old backup, the timer bar names them and links to each. |
+| D6 | **Fixed** | The data hooks record errors. Home, contact, job, Notes and Export show "Couldn't load … This doesn't mean anything was deleted", with **Try again**. A failed database open is no longer cached, so Retry works without a reload. Onboarding ("No contacts yet") appears only after a *successful* empty read. |
+| D7 | **Fixed** | Photo saves report "Saved X of Y" with the reason (including out-of-storage). The unsaved photos stay in the dialog so Save retries just those. Delete and caption failures are reported too. |
+| D8 | **Fixed** | Wording is now "Backup download started … check that the file was saved (on iPhone: Files → Downloads)", and the label reads "Last backup download". A restore no longer counts as a backup. The restore dialog offers **Back up current data first**. |
+| D9 | **Fixed** (needs iPhone confirmation) | Download links are revoked after 60 s instead of immediately, and the link is attached to the page before the click. |
+| D10 | **Improved** (needs on-device stress test) | The ZIP writer reads one photo at a time for its checksum and then references the original file, so it no longer copies the whole archive twice in memory. Restore reads only the small headers and slices file data from the picked ZIP. Archives over 4 GB fail with a clear message. Generated ZIPs pass Python `zipfile` CRC checks. |
+| D11 | **Partly fixed** | Import duplicate detection ignores phone formatting and letter case. Manual contact creation warns about a possible duplicate (same name, phone or email) and asks before creating; nothing is merged. A full duplicate *review* screen is still planned for Phase 3. Double-submit is blocked. |
+| D12 | **Fixed** | Deleting a job or contact (with its punches and photos) is one all-or-nothing transaction. Confirmations state how many punches or photos will go. |
+| D13 | **Fixed** | Page loads fall back to that page's cached copy after 4 s on a weak signal, while the network request keeps going and refreshes the cache. The cache was renamed to `v2`, which clears old leftovers. |
+| D14 | **Fixed** | Pinch-zoom is re-enabled. |
+| D15 | Open | Lint is down from 7 errors to 5. The rest are an older pattern in pages scheduled for rework in Phases 3–4; behaviour is unaffected. |
+| — | Added | The app asks the browser for persistent storage (`navigator.storage.persist()`) on startup. Export shows storage used and whether data is protected from automatic clearing. |
+| — | Fixed | The home header no longer squeezes the title into the buttons on narrow iPhones (found during visual checks). |
+
+**Data compatibility:** no stored record format changed and no data migration runs. Existing contacts, jobs, punches, photos, notes and backups load as before. Older backups restore unchanged, and backups made now restore on the previous version.
+
+**Still needs a real device:** D9 and D10 on iPhone Safari and the home-screen app; whether iOS honours `persist()` (it may only for the home-screen app); and the save-on-close behaviour when swiping the app away on iOS.

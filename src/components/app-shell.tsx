@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FolderOpen, NotebookPen, Download, Clock } from "lucide-react";
@@ -16,8 +17,6 @@ const nav = [
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-
   return (
     <div className="relative flex min-h-full flex-col">
       <PwaRegister />
@@ -55,40 +54,67 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-28 pt-5">
-        {children}
+        {/* Boundary around page content only, so the header and nav are
+            always in the first HTML even when a large page streams in. */}
+        <Suspense
+          fallback={
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Loading…
+            </p>
+          }
+        >
+          {children}
+        </Suspense>
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[oklch(0.35_0.03_155_/0.15)] bg-[oklch(0.98_0.008_95_/0.92)] backdrop-blur-md">
-        <div className="mx-auto grid max-w-lg grid-cols-3 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
-          {nav.map(({ href, label, icon: Icon }) => {
-            const active =
-              href === "/"
-                ? pathname === "/" || pathname.startsWith("/contacts") || pathname.startsWith("/jobs")
-                : pathname.startsWith(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-xs font-medium transition-colors",
-                  active
-                    ? "text-[oklch(0.32_0.05_155)]"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon
-                  className={cn(
-                    "h-5 w-5 transition-transform",
-                    active && "scale-110",
-                  )}
-                  strokeWidth={active ? 2.4 : 2}
-                />
-                {label}
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
+      {/* usePathname() needs a boundary on dynamic routes; the fallback is
+          the same nav without the active highlight. */}
+      <Suspense fallback={<BottomNav pathname={null} />}>
+        <CurrentBottomNav />
+      </Suspense>
     </div>
+  );
+}
+
+function CurrentBottomNav() {
+  return <BottomNav pathname={usePathname()} />;
+}
+
+function BottomNav({ pathname }: { pathname: string | null }) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[oklch(0.35_0.03_155_/0.15)] bg-[oklch(0.98_0.008_95_/0.92)] backdrop-blur-md">
+      <div className="mx-auto grid max-w-lg grid-cols-3 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
+        {nav.map(({ href, label, icon: Icon }) => {
+          const active =
+            pathname !== null &&
+            (href === "/"
+              ? pathname === "/" ||
+                pathname.startsWith("/contacts") ||
+                pathname.startsWith("/jobs")
+              : pathname.startsWith(href));
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                "flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-xs font-medium transition-colors",
+                active
+                  ? "text-[oklch(0.32_0.05_155)]"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon
+                className={cn(
+                  "h-5 w-5 transition-transform",
+                  active && "scale-110",
+                )}
+                strokeWidth={active ? 2.4 : 2}
+              />
+              {label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

@@ -105,7 +105,7 @@ test.describe("Job Snap smoke", () => {
     const noteBox = page.getByPlaceholder(/Quick day note/);
     await noteBox.fill("Arrived, checked panel");
     await noteBox.blur();
-    await expect(page.getByText("Saved")).toBeVisible();
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 
     // ── Punch out, close, Reopen & punch in ──
     await page
@@ -254,7 +254,7 @@ test.describe("Job Snap smoke", () => {
     const backupPath = path.join(tmp, await backupDownload.suggestedFilename());
     await backupDownload.saveAs(backupPath);
     expect(fs.statSync(backupPath).size).toBeGreaterThan(50);
-    await expect(page.getByText(/Backup saved/)).toBeVisible();
+    await expect(page.getByText(/Backup download started/)).toBeVisible();
 
     await addContact(page, "Throwaway Temp");
     await expect(

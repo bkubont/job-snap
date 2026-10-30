@@ -35,8 +35,10 @@ import { downloadThisWeekCsv } from "@/lib/export";
 import { formatElapsedLive, formatDay } from "@/lib/time";
 import {
   contactDedupeKey,
+  findPossibleDuplicates,
   parseContactImportFile,
 } from "@/lib/vcard";
+import { LoadError } from "@/components/load-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,7 +90,7 @@ function contactMatchesQuery(
 }
 
 export default function HomePage() {
-  const { contacts, loading } = useContacts();
+  const { contacts, loading, error: contactsError, retry } = useContacts();
   const { active } = useActivePunch();
   const { recent } = useRecentJobs(5);
   const [pickerOk, setPickerOk] = useState(false);
@@ -101,6 +103,7 @@ export default function HomePage() {
   const [fileImporting, setFileImporting] = useState(false);
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [csvBusy, setCsvBusy] = useState(false);
+  const [creatingContact, setCreatingContact] = useState(false);
   const [query, setQuery] = useState("");
   const [, setTick] = useState(0);
   const [form, setForm] = useState<ContactForm>(emptyForm);
@@ -228,19 +231,42 @@ export default function HomePage() {
 
   async function onCreateManual(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim()) return;
-    await createContact({
-      name: form.name,
-      phone: form.phone,
-      email: form.email,
-      address: form.address,
-      notes: form.notes,
-      hourlyRate: parseHourlyRateInput(form.hourlyRate),
-    });
-    setForm(emptyForm);
-    setShowMore(false);
-    setOpen(false);
-    refreshSitefold();
+    if (!form.name.trim() || creatingContact) return;
+    const dupes = findPossibleDuplicates(form, contacts);
+    if (
+      dupes.length &&
+      !confirm(
+        `Possible duplicate of ${dupes
+          .slice(0, 3)
+          .map((d) => d.name + (d.phone ? ` (${d.phone})` : ""))
+          .join(", ")}. Create a separate contact anyway?`,
+      )
+    ) {
+      return;
+    }
+    setCreatingContact(true);
+    try {
+      await createContact({
+        name: form.name,
+        phone: form.phone,
+        email: form.email,
+        address: form.address,
+        notes: form.notes,
+        hourlyRate: parseHourlyRateInput(form.hourlyRate),
+      });
+      setForm(emptyForm);
+      setShowMore(false);
+      setOpen(false);
+      refreshSitefold();
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? `Contact not saved: ${err.message}`
+          : "Contact not saved.",
+      );
+    } finally {
+      setCreatingContact(false);
+    }
   }
 
   async function onContinuePunch(jobId: string) {
@@ -280,6 +306,9 @@ export default function HomePage() {
   }
 
   const hasContacts = contacts.length > 0;
+  // Only show first-run onboarding once we know storage really is empty —
+  // never while loading or after a failed read.
+  const showOnboarding = !loading && !contactsError && !hasContacts;
   const continueJobs = recent.filter((r) => r.job.id !== active?.job.id).slice(0, 5);
   const normalizedQuery = query.trim().toLowerCase();
   const filteredContacts = useMemo(
@@ -298,14 +327,20 @@ export default function HomePage() {
         tabIndex={-1}
         onChange={(e) => onImportVcfFile(e.target.files)}
       />
-      {hasContacts ? (
-        <section className="flex items-center justify-between gap-3 rounded-2xl bg-[oklch(0.32_0.05_155)] px-4 py-3 text-[oklch(0.97_0.02_95)] shadow-sm">
-          <div className="min-w-0">
+      {!showOnboarding ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[oklch(0.32_0.05_155)] px-4 py-3 text-[oklch(0.97_0.02_95)] shadow-sm">
+          {/* Wraps the buttons below the title on narrow phones instead of
+              squeezing the title into them. */}
+          <div className="shrink-0">
             <p className="font-heading text-lg font-semibold tracking-tight">
               Job Snap
             </p>
             <p className="text-[11px] text-[oklch(0.9_0.03_95_/0.75)]">
-              {contacts.length} {contacts.length === 1 ? "folder" : "folders"}
+              {loading
+                ? "Loading…"
+                : contactsError && !hasContacts
+                  ? "Storage unavailable"
+                  : `${contacts.length} ${contacts.length === 1 ? "folder" : "folders"}`}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
@@ -368,6 +403,7 @@ export default function HomePage() {
                   setShowMore={setShowMore}
                   pickerOk={pickerOk}
                   onSubmit={onCreateManual}
+                  submitting={creatingContact}
                 />
               </DialogContent>
             </Dialog>
@@ -435,6 +471,7 @@ export default function HomePage() {
                   setShowMore={setShowMore}
                   pickerOk={pickerOk}
                   onSubmit={onCreateManual}
+                  submitting={creatingContact}
                 />
               </DialogContent>
             </Dialog>
@@ -525,9 +562,11 @@ export default function HomePage() {
             Contact folders
           </h2>
           <span className="text-xs text-muted-foreground">
-            {normalizedQuery
-              ? `${filteredContacts.length} of ${contacts.length}`
-              : `${contacts.length} ${contacts.length === 1 ? "folder" : "folders"}`}
+            {loading || (contactsError && !hasContacts)
+              ? ""
+              : normalizedQuery
+                ? `${filteredContacts.length} of ${contacts.length}`
+                : `${contacts.length} ${contacts.length === 1 ? "folder" : "folders"}`}
           </span>
         </div>
 
@@ -544,7 +583,9 @@ export default function HomePage() {
           </div>
         ) : null}
 
-        {loading ? (
+        {contactsError && !hasContacts ? (
+          <LoadError error={contactsError} onRetry={retry} what="your contacts" />
+        ) : loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : contacts.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] bg-white/50 px-5 py-12 text-center">
@@ -606,6 +647,7 @@ function ContactCreateForm({
   setShowMore,
   pickerOk,
   onSubmit,
+  submitting,
 }: {
   form: ContactForm;
   setForm: React.Dispatch<React.SetStateAction<ContactForm>>;
@@ -613,6 +655,7 @@ function ContactCreateForm({
   setShowMore: (v: boolean) => void;
   pickerOk: boolean;
   onSubmit: (e: React.FormEvent) => void;
+  submitting: boolean;
 }) {
   return (
     <form onSubmit={onSubmit} className="space-y-3">
@@ -703,8 +746,8 @@ function ContactCreateForm({
           from the home screen, or add contacts here.
         </p>
       ) : null}
-      <Button type="submit" className="w-full">
-        Create folder
+      <Button type="submit" className="w-full" disabled={submitting}>
+        {submitting ? "Saving…" : "Create folder"}
       </Button>
     </form>
   );

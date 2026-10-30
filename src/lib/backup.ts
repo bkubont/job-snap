@@ -169,6 +169,10 @@ export async function buildFullBackupZip(): Promise<{
   };
 }
 
+/**
+ * Start the backup download. The browser (or the iPhone save sheet) decides
+ * whether the file is actually kept, so callers must word this as "started".
+ */
 export async function downloadFullBackup() {
   const { blob, filename, counts } = await buildFullBackupZip();
   downloadBlob(filename, blob);
@@ -184,29 +188,35 @@ function readU32(view: DataView, offset: number) {
   return view.getUint32(offset, true);
 }
 
-/** Parse a STORE-only ZIP produced by buildZipBlob. */
+/**
+ * Parse a STORE-only ZIP produced by buildZipBlob. Entries are returned as
+ * slices of the original file (no copy), keeping memory low for big backups.
+ */
 export async function parseZipEntries(
   zipBlob: Blob,
-): Promise<Map<string, Uint8Array>> {
-  const buffer = await zipBlob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const view = new DataView(buffer);
-  const entries = new Map<string, Uint8Array>();
+): Promise<Map<string, Blob>> {
+  const entries = new Map<string, Blob>();
   const decoder = new TextDecoder();
+  const total = zipBlob.size;
 
+  // Read only each 30-byte local header and its name; file data stays on disk.
   let offset = 0;
-  while (offset + 30 <= bytes.length) {
-    const sig = readU32(view, offset);
+  while (offset + 30 <= total) {
+    const header = await zipBlob.slice(offset, offset + 30).arrayBuffer();
+    const view = new DataView(header);
+    const sig = readU32(view, 0);
     if (sig !== 0x04034b50) break;
 
-    const flags = readU16(view, offset + 6);
-    const method = readU16(view, offset + 8);
-    const compressedSize = readU32(view, offset + 18);
-    const nameLen = readU16(view, offset + 26);
-    const extraLen = readU16(view, offset + 28);
+    const flags = readU16(view, 6);
+    const method = readU16(view, 8);
+    const compressedSize = readU32(view, 18);
+    const nameLen = readU16(view, 26);
+    const extraLen = readU16(view, 28);
     const nameStart = offset + 30;
     const nameEnd = nameStart + nameLen;
-    const name = decoder.decode(bytes.subarray(nameStart, nameEnd));
+    const name = decoder.decode(
+      await zipBlob.slice(nameStart, nameEnd).arrayBuffer(),
+    );
     const dataStart = nameEnd + extraLen;
 
     if (flags & 0x8) {
@@ -221,10 +231,10 @@ export async function parseZipEntries(
     }
 
     const dataEnd = dataStart + compressedSize;
-    if (dataEnd > bytes.length) {
+    if (dataEnd > total) {
       throw new Error("Backup ZIP is truncated or corrupt.");
     }
-    entries.set(name, bytes.slice(dataStart, dataEnd));
+    entries.set(name, zipBlob.slice(dataStart, dataEnd));
     offset = dataEnd;
   }
 
@@ -232,10 +242,6 @@ export async function parseZipEntries(
     throw new Error("No files found in backup ZIP.");
   }
   return entries;
-}
-
-function asString(data: Uint8Array) {
-  return new TextDecoder().decode(data);
 }
 
 function isContact(value: unknown): value is Contact {
@@ -314,17 +320,17 @@ export async function restoreFullBackup(zipBlob: Blob) {
   if (!backupBytes) {
     throw new Error('Backup ZIP must contain "backup.json".');
   }
-  const payload = parseBackupJson(asString(backupBytes));
+  const payload = parseBackupJson(await backupBytes.text());
 
   const photos: Photo[] = [];
   for (const meta of payload.photos) {
-    const fileBytes = entries.get(meta.filename);
-    if (!fileBytes) {
+    const file = entries.get(meta.filename);
+    if (!file) {
       throw new Error(`Missing photo file: ${meta.filename}`);
     }
-    const copy = new Uint8Array(fileBytes.byteLength);
-    copy.set(fileBytes);
-    const blob = new Blob([copy], {
+    // Materialize the bytes: a slice of the picked File must not be stored
+    // in IndexedDB as a lazy reference to a file that may move.
+    const blob = new Blob([await file.arrayBuffer()], {
       type: meta.mimeType || "image/jpeg",
     });
     photos.push({
@@ -344,7 +350,8 @@ export async function restoreFullBackup(zipBlob: Blob) {
     photos,
   });
 
-  markBackupCompleted();
+  // Deliberately not marking a backup here: the restored data hasn't been
+  // backed up from this device yet, so the reminder should stay accurate.
 
   return {
     contacts: payload.contacts.length,

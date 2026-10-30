@@ -240,31 +240,55 @@ export function PhotoGallery({
   }
 
   async function saveWithCaption(skip: boolean) {
-    if (!captionPrompt) return;
+    if (!captionPrompt || busy) return;
     setBusy(true);
+    const caption = skip ? "" : pendingCaption.trim();
+    const files = captionPrompt.files;
+    let saved = 0;
     try {
-      const caption = skip ? "" : pendingCaption.trim();
-      for (const file of captionPrompt.files) {
+      for (const file of files) {
         await addPhoto(jobId, file, caption);
+        saved += 1;
       }
-      refreshSitefold();
       setCaptionPrompt(null);
       setPendingCaption("");
+    } catch (e) {
+      const reason =
+        e instanceof Error && e.name === "QuotaExceededError"
+          ? "This device is out of storage for Job Snap. Make a full backup, then free up space."
+          : e instanceof Error
+            ? e.message
+            : "Unknown error.";
+      // Keep only the unsaved files in the prompt so Save retries just those.
+      setCaptionPrompt({ files: files.slice(saved) });
+      alert(
+        `Saved ${saved} of ${files.length} photo${files.length === 1 ? "" : "s"}. ${reason}`,
+      );
     } finally {
+      refreshSitefold();
       setBusy(false);
     }
   }
 
   async function onDelete(id: string) {
-    if (!confirm("Delete this photo?")) return;
-    await deletePhoto(id);
-    if (lightboxId === id) setLightboxId(null);
-    refreshSitefold();
+    if (!confirm("Delete this photo? This can't be undone.")) return;
+    try {
+      await deletePhoto(id);
+      if (lightboxId === id) setLightboxId(null);
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not delete photo");
+    }
   }
 
   async function onSaveCaption(id: string, caption: string) {
-    await updatePhotoCaption(id, caption);
-    refreshSitefold();
+    try {
+      await updatePhotoCaption(id, caption);
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not save caption");
+      throw e;
+    }
   }
 
   return (

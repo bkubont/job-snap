@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import {
   useActivePunch,
+  useAutosave,
   useDayNote,
   useJob,
+  useToday,
   refreshSitefold,
 } from "@/hooks/use-sitefold";
 import {
@@ -24,7 +26,7 @@ import {
   punchOut,
   reopenAndPunchIn,
   switchPunchToJob,
-  updateJob,
+  updateJobFields,
   updatePunch,
 } from "@/lib/db";
 import type { Punch } from "@/lib/types";
@@ -41,17 +43,28 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { PhotoGallery } from "@/components/photo-gallery";
+import { LoadError, SaveStatus } from "@/components/load-error";
 import {
   durationMinutes,
   formatClock,
   formatDateTime,
   formatDay,
   formatDuration,
+  formatMinutes,
   fromDatetimeLocalValue,
   hoursFromMinutes,
   toDatetimeLocalValue,
-  todayKey,
 } from "@/lib/time";
+
+/**
+ * Keep the stored timestamp (with its seconds) when the minute-precision
+ * input wasn't changed; only an edited field is rewritten.
+ */
+function editedTimestamp(original: string | null, inputValue: string) {
+  if (!inputValue) return null;
+  if (original && toDatetimeLocalValue(original) === inputValue) return original;
+  return fromDatetimeLocalValue(inputValue);
+}
 
 export default function JobPage({
   params,
@@ -60,15 +73,16 @@ export default function JobPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { job, contact, punches, photos } = useJob(id);
+  const { job, contact, punches, photos, error, retry } = useJob(id);
   const { active } = useActivePunch();
-  const today = todayKey();
+  const today = useToday();
   const { note: dayNote, loading: dayNoteLoading, save: saveDayNote } =
     useDayNote(today);
   const [busy, setBusy] = useState(false);
-  const [jobNotes, setJobNotes] = useState<string | null>(null);
-  const [todayBody, setTodayBody] = useState<string | null>(null);
-  const [daySavedFlash, setDaySavedFlash] = useState(false);
+  const jobNotes = useAutosave(job?.notes ?? "", (notes) =>
+    updateJobFields(id, { notes }).then(refreshSitefold),
+  );
+  const todayNote = useAutosave(dayNote?.body ?? "", saveDayNote);
   const [editing, setEditing] = useState<Punch | null>(null);
   const [editIn, setEditIn] = useState("");
   const [editOut, setEditOut] = useState("");
@@ -80,7 +94,11 @@ export default function JobPage({
   const [titleError, setTitleError] = useState<string | null>(null);
 
   if (job === undefined) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return error ? (
+      <LoadError error={error} onRetry={retry} what="this job" />
+    ) : (
+      <p className="text-sm text-muted-foreground">Loading…</p>
+    );
   }
   if (job === null || !contact) {
     return (
@@ -93,8 +111,6 @@ export default function JobPage({
     );
   }
 
-  const notesValue = jobNotes ?? job.notes;
-  const todayValue = todayBody ?? dayNote?.body ?? "";
   const isActiveHere = active?.job.id === job.id;
   const someoneElseActive = active && active.job.id !== job.id;
   const isClosed = job.status === "closed";
@@ -107,12 +123,7 @@ export default function JobPage({
       p.punchedOutAt ? sum + durationMinutes(p.punchedInAt, p.punchedOutAt) : sum,
     0,
   );
-  const closedTotalLabel =
-    closedTotalMinutes < 60
-      ? `${closedTotalMinutes}m`
-      : `${Math.floor(closedTotalMinutes / 60)}h${
-          closedTotalMinutes % 60 ? ` ${closedTotalMinutes % 60}m` : ""
-        }`;
+  const closedTotalLabel = formatMinutes(closedTotalMinutes);
 
   async function onPunchIn() {
     setBusy(true);
@@ -153,7 +164,8 @@ export default function JobPage({
   async function onPunchOut() {
     setBusy(true);
     try {
-      await punchOut();
+      // Punch out this job's timer specifically, not whichever is newest.
+      await punchOut(isActiveHere ? active!.punch.id : undefined);
       refreshSitefold();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Could not punch out");
@@ -162,30 +174,26 @@ export default function JobPage({
     }
   }
 
-  async function saveNotes() {
-    await updateJob({ ...job!, notes: notesValue });
-    setJobNotes(null);
-    refreshSitefold();
-  }
-
-  async function persistTodayNote() {
-    const next = todayBody;
-    if (next === null) return;
-    if (next === (dayNote?.body ?? "")) {
-      setTodayBody(null);
-      return;
-    }
-    await saveDayNote(next);
-    setTodayBody(null);
-    setDaySavedFlash(true);
-    setTimeout(() => setDaySavedFlash(false), 1500);
-  }
-
   async function onDelete() {
-    if (!confirm("Delete this job, its punches, and photos?")) return;
-    await deleteJob(id);
-    refreshSitefold();
-    router.push(`/contacts/${job!.contactId}`);
+    if (
+      !confirm(
+        `Delete "${job!.title}" with its ${punches.length} punch${
+          punches.length === 1 ? "" : "es"
+        } and ${photos.length} photo${photos.length === 1 ? "" : "s"}? This can't be undone.`,
+      )
+    )
+      return;
+    try {
+      await deleteJob(id);
+      refreshSitefold();
+      router.push(`/contacts/${job!.contactId}`);
+    } catch (e) {
+      alert(
+        e instanceof Error
+          ? `Nothing was deleted: ${e.message}`
+          : "Nothing was deleted.",
+      );
+    }
   }
 
   function openTitleEdit() {
@@ -203,7 +211,7 @@ export default function JobPage({
     setSavingTitle(true);
     setTitleError(null);
     try {
-      await updateJob({ ...job!, title: next });
+      await updateJobFields(id, { title: next });
       refreshSitefold();
       setTitleEditing(false);
     } catch (e) {
@@ -232,8 +240,8 @@ export default function JobPage({
     setEditError(null);
     try {
       await updatePunch(editing.id, {
-        punchedInAt: fromDatetimeLocalValue(editIn),
-        punchedOutAt: editOut ? fromDatetimeLocalValue(editOut) : null,
+        punchedInAt: editedTimestamp(editing.punchedInAt, editIn)!,
+        punchedOutAt: editedTimestamp(editing.punchedOutAt, editOut),
       });
       refreshSitefold();
       setEditing(null);
@@ -442,31 +450,39 @@ export default function JobPage({
       <section className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-heading text-lg font-semibold">Today&apos;s note</h2>
-          <span className="text-xs text-muted-foreground">
-            {daySavedFlash ? "Saved" : formatDay(today)}
-          </span>
+          <SaveStatus
+            status={todayNote.status}
+            dirty={todayNote.dirty}
+            error={todayNote.error}
+            onRetry={() => void todayNote.flush()}
+            idleLabel={today ? formatDay(today) : ""}
+          />
         </div>
         <Textarea
-          value={todayValue}
-          onChange={(e) => setTodayBody(e.target.value)}
-          onBlur={() => {
-            void persistTodayNote();
-          }}
+          value={todayNote.value}
+          onChange={(e) => todayNote.setValue(e.target.value)}
+          onBlur={() => void todayNote.flush()}
           placeholder="Quick day note while you're on the job…"
           rows={2}
           className="bg-white/70"
-          disabled={dayNoteLoading}
+          disabled={!today || dayNoteLoading}
         />
       </section>
 
       <section className="space-y-2">
-        <h2 className="font-heading text-lg font-semibold">Job notes</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-heading text-lg font-semibold">Job notes</h2>
+          <SaveStatus
+            status={jobNotes.status}
+            dirty={jobNotes.dirty}
+            error={jobNotes.error}
+            onRetry={() => void jobNotes.flush()}
+          />
+        </div>
         <Textarea
-          value={notesValue}
-          onChange={(e) => setJobNotes(e.target.value)}
-          onBlur={() => {
-            if (jobNotes !== null && jobNotes !== job.notes) saveNotes();
-          }}
+          value={jobNotes.value}
+          onChange={(e) => jobNotes.setValue(e.target.value)}
+          onBlur={() => void jobNotes.flush()}
           placeholder="Materials, access codes, what to finish next…"
           rows={4}
           className="bg-white/70"

@@ -1,5 +1,8 @@
 /* Job Snap service worker — caches app shell only, never IndexedDB user data. */
-const CACHE_NAME = "job-snap-shell-v1";
+const CACHE_NAME = "job-snap-shell-v2";
+// On a weak signal, don't wait forever for the network before showing the
+// cached screen (the fetch keeps going and refreshes the cache).
+const NAVIGATION_TIMEOUT_MS = 4000;
 const PRECACHE_URLS = [
   "/",
   "/notes",
@@ -62,19 +65,36 @@ self.addEventListener("fetch", (event) => {
 
   // Navigations: network first, fall back to cached shell
   if (request.mode === "navigate") {
+    const network = fetch(request).then(async (fresh) => {
+      if (fresh.ok) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, fresh.clone());
+      }
+      return fresh;
+    });
+    event.waitUntil(network.catch(() => {}));
     event.respondWith(
       (async () => {
+        const cachedSame = await caches.match(request);
+        if (cachedSame) {
+          // Network first, but fall back to this page's cached copy after a timeout.
+          const timeout = new Promise((resolve) =>
+            setTimeout(() => resolve(null), NAVIGATION_TIMEOUT_MS),
+          );
+          try {
+            const winner = await Promise.race([network, timeout]);
+            if (winner) return winner;
+          } catch {
+            /* offline */
+          }
+          return cachedSame;
+        }
         try {
-          const fresh = await fetch(request);
-          const cache = await caches.open(CACHE_NAME);
-          cache.put(request, fresh.clone());
-          return fresh;
+          return await network;
         } catch {
-          const cached =
-            (await caches.match(request)) ||
-            (await caches.match("/")) ||
-            (await caches.match("/export"));
-          if (cached) return cached;
+          const fallback =
+            (await caches.match("/")) || (await caches.match("/export"));
+          if (fallback) return fallback;
           return new Response("Job Snap is offline. Open once online to cache the shell.", {
             status: 503,
             headers: { "Content-Type": "text/plain; charset=utf-8" },

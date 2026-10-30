@@ -1,4 +1,9 @@
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import {
+  openDB,
+  type DBSchema,
+  type IDBPDatabase,
+  type IDBPTransaction,
+} from "idb";
 import type {
   ActivePunchInfo,
   Contact,
@@ -47,7 +52,7 @@ function getDb() {
     throw new Error("IndexedDB is only available in the browser");
   }
   if (!dbPromise) {
-    dbPromise = openDB<SitefoldDB>(DB_NAME, DB_VERSION, {
+    const opening = openDB<SitefoldDB>(DB_NAME, DB_VERSION, {
       upgrade(db) {
         const contacts = db.createObjectStore("contacts", { keyPath: "id" });
         contacts.createIndex("by-name", "name");
@@ -65,9 +70,54 @@ function getDb() {
         const dayNotes = db.createObjectStore("dayNotes", { keyPath: "id" });
         dayNotes.createIndex("by-date", "date", { unique: true });
       },
+      terminated() {
+        // Browser closed the connection (e.g. storage cleared); reopen next time.
+        dbPromise = null;
+      },
     });
+    // Don't cache a failed open, so Retry can try again without a reload.
+    opening.catch(() => {
+      if (dbPromise === opening) dbPromise = null;
+    });
+    dbPromise = opening;
   }
   return dbPromise;
+}
+
+/**
+ * Ask the browser not to evict Job Snap's data under storage pressure
+ * (Safari otherwise may clear it after a period of inactivity).
+ */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (!navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
+}
+
+export async function getStorageStatus(): Promise<{
+  persisted: boolean | null;
+  usage: number | null;
+  quota: number | null;
+}> {
+  try {
+    const persisted = navigator.storage?.persisted
+      ? await navigator.storage.persisted()
+      : null;
+    const estimate = navigator.storage?.estimate
+      ? await navigator.storage.estimate()
+      : null;
+    return {
+      persisted,
+      usage: estimate?.usage ?? null,
+      quota: estimate?.quota ?? null,
+    };
+  } catch {
+    return { persisted: null, usage: null, quota: null };
+  }
 }
 
 function id() {
@@ -144,13 +194,16 @@ export async function updateContact(contact: Contact) {
   return normalized;
 }
 
+/** Delete a contact with all its jobs, punches, and photos — all or nothing. */
 export async function deleteContact(contactId: string) {
   const db = await getDb();
-  const jobs = await db.getAllFromIndex("jobs", "by-contact", contactId);
-  for (const job of jobs) {
-    await deleteJob(job.id);
+  const tx = db.transaction(["contacts", "jobs", "punches", "photos"], "readwrite");
+  const jobs = await tx.objectStore("jobs").index("by-contact").getAllKeys(contactId);
+  for (const jobId of jobs) {
+    await deleteJobInTx(tx, jobId);
   }
-  await db.delete("contacts", contactId);
+  await tx.objectStore("contacts").delete(contactId);
+  await tx.done;
 }
 
 export async function listJobsForContact(contactId: string): Promise<Job[]> {
@@ -194,17 +247,53 @@ export async function updateJob(job: Job) {
   return job;
 }
 
+/**
+ * Patch selected fields on the latest stored copy of a job (read + write in one
+ * transaction), so an autosaving note can't overwrite a title or status that
+ * changed since the screen loaded.
+ */
+export async function updateJobFields(
+  jobId: string,
+  patch: Partial<Pick<Job, "title" | "notes" | "status">>,
+) {
+  const db = await getDb();
+  const tx = db.transaction("jobs", "readwrite");
+  const current = await tx.store.get(jobId);
+  if (!current) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error("This job no longer exists.");
+  }
+  const next: Job = { ...current, ...patch };
+  await tx.store.put(next);
+  await tx.done;
+  return next;
+}
+
+type JobCascadeTx = IDBPTransaction<
+  SitefoldDB,
+  ("jobs" | "punches" | "photos" | "contacts")[],
+  "readwrite"
+>;
+
+async function deleteJobInTx(tx: JobCascadeTx, jobId: string) {
+  const punchKeys = await tx.objectStore("punches").index("by-job").getAllKeys(jobId);
+  for (const key of punchKeys) {
+    await tx.objectStore("punches").delete(key);
+  }
+  const photoKeys = await tx.objectStore("photos").index("by-job").getAllKeys(jobId);
+  for (const key of photoKeys) {
+    await tx.objectStore("photos").delete(key);
+  }
+  await tx.objectStore("jobs").delete(jobId);
+}
+
+/** Delete a job with its punches and photos — all or nothing. */
 export async function deleteJob(jobId: string) {
   const db = await getDb();
-  const punches = await db.getAllFromIndex("punches", "by-job", jobId);
-  for (const punch of punches) {
-    await db.delete("punches", punch.id);
-  }
-  const photos = await db.getAllFromIndex("photos", "by-job", jobId);
-  for (const photo of photos) {
-    await db.delete("photos", photo.id);
-  }
-  await db.delete("jobs", jobId);
+  const tx = db.transaction(["contacts", "jobs", "punches", "photos"], "readwrite");
+  await deleteJobInTx(tx, jobId);
+  await tx.done;
 }
 
 export async function listPunchesForJob(jobId: string): Promise<Punch[]> {
@@ -227,22 +316,60 @@ export async function listAllPunches(): Promise<Punch[]> {
   );
 }
 
-export async function getOpenPunch(): Promise<ActivePunchInfo | null> {
+/**
+ * Every open punch with its job and contact, oldest first. Normally zero or
+ * one; more means two tabs raced (before punch-in was transactional) and the
+ * UI should ask the user to close the extras.
+ */
+export async function listOpenPunches(): Promise<ActivePunchInfo[]> {
   const punches = await (await getDb()).getAll("punches");
-  const open = punches.find((p) => p.punchedOutAt === null);
-  if (!open) return null;
-  const job = await getJob(open.jobId);
-  if (!job) return null;
-  const contact = await getContact(job.contactId);
-  if (!contact) return null;
-  return { punch: open, job, contact };
+  const open = punches
+    .filter((p) => p.punchedOutAt === null)
+    .sort(
+      (a, b) =>
+        new Date(a.punchedInAt).getTime() - new Date(b.punchedInAt).getTime(),
+    );
+  const results: ActivePunchInfo[] = [];
+  for (const punch of open) {
+    const job = await getJob(punch.jobId);
+    if (!job) continue;
+    const contact = await getContact(job.contactId);
+    if (!contact) continue;
+    results.push({ punch, job, contact });
+  }
+  return results;
 }
 
+export async function getOpenPunch(): Promise<ActivePunchInfo | null> {
+  const open = await listOpenPunches();
+  // Most recent open punch is the "active" one.
+  return open[open.length - 1] ?? null;
+}
+
+async function describeOpenPunch(punch: Punch) {
+  const job = await getJob(punch.jobId);
+  const contact = job ? await getContact(job.contactId) : undefined;
+  return job && contact
+    ? `"${job.title}" for ${contact.name}`
+    : "another job";
+}
+
+/**
+ * Check-then-insert inside one readwrite transaction. IndexedDB serializes
+ * overlapping readwrite transactions on the same store (also across tabs),
+ * so two taps can never both open a timer.
+ */
 export async function punchIn(jobId: string) {
-  const existing = await getOpenPunch();
-  if (existing) {
+  const db = await getDb();
+  const tx = db.transaction("punches", "readwrite");
+  const store = tx.objectStore("punches");
+  const all = await store.getAll();
+  const open = all.find((p) => p.punchedOutAt === null);
+  if (open) {
+    tx.abort();
+    await tx.done.catch(() => {});
     throw new Error(
-      `Already punched in on "${existing.job.title}" for ${existing.contact.name}. Punch out first.`,
+      `Already punched in on ${await describeOpenPunch(open)}. Punch out first.`,
     );
   }
   const punch: Punch = {
@@ -251,7 +378,8 @@ export async function punchIn(jobId: string) {
     punchedInAt: now(),
     punchedOutAt: null,
   };
-  await (await getDb()).put("punches", punch);
+  await store.put(punch);
+  await tx.done;
   return punch;
 }
 
@@ -276,8 +404,12 @@ export async function updatePunch(
   punchId: string,
   patch: { punchedInAt?: string; punchedOutAt?: string | null },
 ) {
+  // One transaction: the "no other open punch" check and the write can't
+  // interleave with a punch-in from another tab. Throwing before put() leaves
+  // the transaction with nothing to commit.
   const db = await getDb();
-  const punch = await db.get("punches", punchId);
+  const tx = db.transaction("punches", "readwrite");
+  const punch = await tx.store.get(punchId);
   if (!punch) {
     throw new Error("Punch not found.");
   }
@@ -304,7 +436,7 @@ export async function updatePunch(
       throw new Error("Punch out time must be after punch in time.");
     }
   } else {
-    const all = await db.getAll("punches");
+    const all = await tx.store.getAll();
     const otherOpen = all.find(
       (p) => p.id !== punchId && p.punchedOutAt === null,
     );
@@ -315,7 +447,8 @@ export async function updatePunch(
     }
   }
 
-  await db.put("punches", next);
+  await tx.store.put(next);
+  await tx.done;
   return next;
 }
 
@@ -328,16 +461,35 @@ export async function deletePunch(punchId: string) {
   await db.delete("punches", punchId);
 }
 
-/** Punch out any open punch, then punch in on `jobId` (no-op if already open there). */
+/**
+ * Punch out any open punch, then punch in on `jobId` (no-op if already open
+ * there). One transaction, so out and in share a timestamp and can't interleave
+ * with another tab.
+ */
 export async function switchPunchToJob(jobId: string) {
-  const existing = await getOpenPunch();
-  if (existing?.job.id === jobId) {
-    return existing.punch;
+  const db = await getDb();
+  const tx = db.transaction("punches", "readwrite");
+  const store = tx.objectStore("punches");
+  const all = await store.getAll();
+  const open = all.filter((p) => p.punchedOutAt === null);
+  const alreadyHere = open.find((p) => p.jobId === jobId);
+  if (alreadyHere && open.length === 1) {
+    await tx.done;
+    return alreadyHere;
   }
-  if (existing) {
-    await punchOut(existing.punch.id);
+  const at = now();
+  for (const p of open) {
+    if (p.id === alreadyHere?.id) continue;
+    await store.put({ ...p, punchedOutAt: at });
   }
-  return punchIn(jobId);
+  if (alreadyHere) {
+    await tx.done;
+    return alreadyHere;
+  }
+  const punch: Punch = { id: id(), jobId, punchedInAt: at, punchedOutAt: null };
+  await store.put(punch);
+  await tx.done;
+  return punch;
 }
 
 /** Ensure job is open, then switch/punch in. */

@@ -379,8 +379,13 @@ export function downloadBlob(filename: string, blob: Blob) {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  // iOS Safari reads the URL after click() returns (while showing the save
+  // sheet); revoking immediately can make the download fail.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** Last 7 days (same range as Export “Last 7 days”), then trigger CSV download. */
@@ -486,31 +491,51 @@ function concatBytes(parts: Uint8Array[]) {
   return out;
 }
 
+/** Our byte arrays always own a plain ArrayBuffer, so they're valid BlobParts. */
+function toBlobPart(bytes: Uint8Array): BlobPart {
+  return bytes as Uint8Array<ArrayBuffer>;
+}
+
 async function blobToUint8Array(blob: Blob) {
   const buffer = await blob.arrayBuffer();
   return new Uint8Array(buffer);
 }
 
-/** Build a ZIP (store-only) containing named files. Works without a server. */
+/**
+ * Build a ZIP (store-only) containing named files. Works without a server.
+ * Photos are read one at a time for their checksum and then referenced as the
+ * original Blob, so memory use stays near one photo instead of the whole
+ * archive (twice) — important for large backups on iPhone.
+ */
 export async function buildZipBlob(
   files: { name: string; data: Uint8Array | Blob | string }[],
 ): Promise<Blob> {
   const encoder = new TextEncoder();
-  const localParts: Uint8Array[] = [];
+  const localParts: BlobPart[] = [];
   const centralParts: Uint8Array[] = [];
   let offset = 0;
 
   for (const file of files) {
     const nameBytes = encoder.encode(file.name.replace(/^\/+/, ""));
-    let data: Uint8Array;
-    if (typeof file.data === "string") {
-      data = encoder.encode(file.data);
-    } else if (file.data instanceof Blob) {
-      data = await blobToUint8Array(file.data);
+    let crc: number;
+    let size: number;
+    let part: BlobPart;
+    if (file.data instanceof Blob) {
+      crc = crc32(await blobToUint8Array(file.data));
+      size = file.data.size;
+      part = file.data;
     } else {
-      data = file.data;
+      const data =
+        typeof file.data === "string" ? encoder.encode(file.data) : file.data;
+      crc = crc32(data);
+      size = data.length;
+      part = toBlobPart(data);
     }
-    const crc = crc32(data);
+    if (offset + size > 0xffffffff) {
+      throw new Error(
+        "This archive would be larger than 4 GB, which ZIP files can't hold. Export a shorter date range or fewer photos.",
+      );
+    }
     const localHeader = concatBytes([
       u32(0x04034b50),
       u16(20),
@@ -519,13 +544,13 @@ export async function buildZipBlob(
       u16(0),
       u16(0),
       u32(crc),
-      u32(data.length),
-      u32(data.length),
+      u32(size),
+      u32(size),
       u16(nameBytes.length),
       u16(0),
       nameBytes,
     ]);
-    localParts.push(localHeader, data);
+    localParts.push(toBlobPart(localHeader), part);
 
     const centralHeader = concatBytes([
       u32(0x02014b50),
@@ -536,8 +561,8 @@ export async function buildZipBlob(
       u16(0),
       u16(0),
       u32(crc),
-      u32(data.length),
-      u32(data.length),
+      u32(size),
+      u32(size),
       u16(nameBytes.length),
       u16(0),
       u16(0),
@@ -548,7 +573,7 @@ export async function buildZipBlob(
       nameBytes,
     ]);
     centralParts.push(centralHeader);
-    offset += localHeader.length + data.length;
+    offset += localHeader.length + size;
   }
 
   const centralDir = concatBytes(centralParts);
@@ -563,11 +588,9 @@ export async function buildZipBlob(
     u16(0),
   ]);
 
-  const bytes = concatBytes([...localParts, centralDir, end]);
-  // Copy into a fresh ArrayBuffer so BlobPart typing stays happy across TS DOM libs.
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return new Blob([copy], { type: "application/zip" });
+  return new Blob([...localParts, toBlobPart(centralDir), toBlobPart(end)], {
+    type: "application/zip",
+  });
 }
 
 export async function buildExportPackageZip(args: {

@@ -9,7 +9,8 @@ import { refreshSitefold } from "@/hooks/use-sitefold";
 import { Button } from "@/components/ui/button";
 
 export function ActivePunchBar() {
-  const { active } = useActivePunch();
+  const { active, openPunches } = useActivePunch();
+  const extras = openPunches.filter((p) => p.punch.id !== active?.punch.id);
   const [, setTick] = useState(0);
   const [busy, setBusy] = useState(false);
 
@@ -61,6 +62,30 @@ export function ActivePunchBar() {
           Punch out
         </Button>
       </div>
+      {extras.length > 0 ? (
+        <div
+          role="alert"
+          className="mx-auto mt-2 max-w-lg rounded-lg bg-[oklch(0.93_0.05_75)] px-3 py-2 text-xs text-[oklch(0.28_0.04_155)]"
+        >
+          <p className="font-semibold">
+            {extras.length + 1} timers are running at once.
+          </p>
+          <p className="mt-0.5">
+            Open each job, then punch out or fix its time:{" "}
+            {extras.map((x, i) => (
+              <span key={x.punch.id}>
+                {i > 0 ? ", " : ""}
+                <Link
+                  href={`/jobs/${x.job.id}`}
+                  className="font-medium underline underline-offset-2"
+                >
+                  {x.contact.name} / {x.job.title}
+                </Link>
+              </span>
+            ))}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
