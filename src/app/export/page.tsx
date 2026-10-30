@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { format, startOfMonth, subDays } from "date-fns";
 import {
   Download,
+  FileText,
   FolderArchive,
   HardDriveDownload,
   Printer,
@@ -35,6 +36,7 @@ import {
   restoreFullBackup,
 } from "@/lib/backup";
 import { formatDay, hoursFromMinutes, todayKey } from "@/lib/time";
+import { buildInvoiceData, downloadInvoicePdf } from "@/lib/invoice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -90,6 +92,7 @@ export default function ExportPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
   const [packaging, setPackaging] = useState(false);
+  const [invoicing, setInvoicing] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
@@ -260,6 +263,22 @@ export default function ExportPage() {
     window.print();
   }
 
+  async function onInvoicePdf() {
+    if (!selectedContact || !from || !to) return;
+    setInvoicing(true);
+    try {
+      const data = buildInvoiceData({
+        contact: selectedContact,
+        rows,
+        from,
+        to,
+      });
+      await downloadInvoicePdf(data);
+    } finally {
+      setInvoicing(false);
+    }
+  }
+
   async function onFullBackup() {
     setBackingUp(true);
     setBackupError(null);
@@ -332,7 +351,7 @@ export default function ExportPage() {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Download or print your time clock with daily notes, job notes, and
-          site photos. Filter by client for invoice-ready packages.
+          site photos. Filter by client for invoice PDF and ZIP packages.
         </p>
       </div>
 
@@ -422,7 +441,25 @@ export default function ExportPage() {
             <Printer className="h-4 w-4" />
             Print / PDF
           </Button>
+          {selectedContact ? (
+            <Button
+              onClick={onInvoicePdf}
+              disabled={loading || invoicing || !from || !to}
+            >
+              <FileText className="h-4 w-4" />
+              {invoicing ? "Building…" : "Download invoice PDF"}
+            </Button>
+          ) : null}
         </div>
+        {selectedContact ? (
+          <p className="text-xs text-muted-foreground">
+            Invoice PDF uses this contact and date range
+            {selectedContact.hourlyRate != null
+              ? ` at $${selectedContact.hourlyRate}/hr`
+              : " (hours only — set a rate on the contact to bill)"}
+            . Closed punches only.
+          </p>
+        ) : null}
         {photoItems.length > 0 ? (
           <p className="text-xs text-muted-foreground">
             ZIP includes the CSV plus {photoItems.length} photo
@@ -574,6 +611,13 @@ export default function ExportPage() {
               {selectedContact.address ? (
                 <li>Address: {selectedContact.address}</li>
               ) : null}
+              {selectedContact.hourlyRate != null ? (
+                <li className="tabular-nums">
+                  Rate: ${selectedContact.hourlyRate}/hr
+                </li>
+              ) : (
+                <li className="text-xs">Rate not set</li>
+              )}
               {!selectedContact.phone &&
               !selectedContact.email &&
               !selectedContact.address ? (

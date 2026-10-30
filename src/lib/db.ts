@@ -78,6 +78,13 @@ function now() {
   return new Date().toISOString();
 }
 
+function normalizeHourlyRate(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
 /** Normalize legacy IndexedDB rows that predate optional fields. */
 function normalizeContact(raw: Contact | undefined): Contact | undefined {
   if (!raw) return undefined;
@@ -87,6 +94,7 @@ function normalizeContact(raw: Contact | undefined): Contact | undefined {
     email: raw.email ?? "",
     address: raw.address ?? "",
     notes: raw.notes ?? "",
+    hourlyRate: normalizeHourlyRate(raw.hourlyRate),
   };
 }
 
@@ -105,6 +113,7 @@ export async function getContact(contactId: string) {
 export async function createContact(
   input: Pick<Contact, "name" | "phone" | "email" | "notes"> & {
     address?: string;
+    hourlyRate?: number | null;
   },
 ) {
   const contact: Contact = {
@@ -114,6 +123,7 @@ export async function createContact(
     email: input.email.trim(),
     address: (input.address ?? "").trim(),
     notes: input.notes.trim(),
+    hourlyRate: normalizeHourlyRate(input.hourlyRate),
     createdAt: now(),
   };
   await (await getDb()).put("contacts", contact);
@@ -128,6 +138,7 @@ export async function updateContact(contact: Contact) {
     email: contact.email.trim(),
     address: (contact.address ?? "").trim(),
     notes: contact.notes.trim(),
+    hourlyRate: normalizeHourlyRate(contact.hourlyRate),
   };
   await (await getDb()).put("contacts", normalized);
   return normalized;

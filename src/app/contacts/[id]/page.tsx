@@ -49,7 +49,40 @@ type EditForm = {
   email: string;
   address: string;
   notes: string;
+  /** Empty string = no rate; otherwise a numeric string for the input. */
+  hourlyRate: string;
 };
+
+function rateToInput(rate: number | null | undefined) {
+  if (rate == null || !Number.isFinite(rate)) return "";
+  return String(rate);
+}
+
+function parseHourlyRateInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function contactToEditForm(contact: {
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+  hourlyRate?: number | null;
+}): EditForm {
+  return {
+    name: contact.name,
+    phone: contact.phone,
+    email: contact.email,
+    address: contact.address,
+    notes: contact.notes,
+    hourlyRate: rateToInput(contact.hourlyRate),
+  };
+}
 
 export default function ContactPage({
   params,
@@ -73,17 +106,12 @@ export default function ContactPage({
     email: "",
     address: "",
     notes: "",
+    hourlyRate: "",
   });
 
   useEffect(() => {
     if (!contact || editing) return;
-    setEditForm({
-      name: contact.name,
-      phone: contact.phone,
-      email: contact.email,
-      address: contact.address,
-      notes: contact.notes,
-    });
+    setEditForm(contactToEditForm(contact));
   }, [contact, editing]);
 
   if (contact === undefined) {
@@ -170,26 +198,14 @@ export default function ContactPage({
   }
 
   function startEdit() {
-    setEditForm({
-      name: contact!.name,
-      phone: contact!.phone,
-      email: contact!.email,
-      address: contact!.address,
-      notes: contact!.notes,
-    });
+    setEditForm(contactToEditForm(contact!));
     setEditing(true);
     setSavedFlash(false);
   }
 
   function cancelEdit() {
     setEditing(false);
-    setEditForm({
-      name: contact!.name,
-      phone: contact!.phone,
-      email: contact!.email,
-      address: contact!.address,
-      notes: contact!.notes,
-    });
+    setEditForm(contactToEditForm(contact!));
   }
 
   async function onSaveContact(e: React.FormEvent) {
@@ -204,6 +220,7 @@ export default function ContactPage({
         email: editForm.email,
         address: editForm.address,
         notes: editForm.notes,
+        hourlyRate: parseHourlyRateInput(editForm.hourlyRate),
       });
       refreshSitefold();
       setEditing(false);
@@ -344,6 +361,21 @@ export default function ContactPage({
               rows={2}
               className="min-h-0"
               placeholder="Optional"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-hourlyRate">Hourly rate (optional)</Label>
+            <Input
+              id="edit-hourlyRate"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              value={editForm.hourlyRate}
+              onChange={(e) =>
+                setEditForm((f) => ({ ...f, hourlyRate: e.target.value }))
+              }
+              placeholder="e.g. 75 — leave blank for hours-only"
             />
           </div>
           <div className="space-y-1.5">

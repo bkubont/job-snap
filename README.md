@@ -15,12 +15,12 @@ Open [http://localhost:3456](http://localhost:3456).
 
 ## Features
 
-- **Contacts** — Contact Picker API (Chrome/Edge on Android), **vCard (`.vcf`) import**, or manual add. Search, edit name/phone/email/address, and **Get directions** from a stored address.
+- **Contacts** — Contact Picker API (Chrome/Edge on Android), **vCard (`.vcf`) import**, or manual add. Search, edit name/phone/email/address, optional **hourly rate**, and **Get directions** from a stored address.
 - **Jobs per contact** — open/close jobs; rename titles on the job page; punch history and photos live on the job.
 - **Punch clock** — one open punch at a time; Continue on home; Switch / Reopen on job pages; sticky bar to punch out; edit or delete punches.
 - **Photos** — camera or library; optional captions; tap for full-screen lightbox; stored with the job and included in export.
 - **Day notes** — notebook for the day (Notes tab + Today’s note on the job); included in exports.
-- **Export (timecard)** — filter by contact and/or job; CSV, **ZIP + photos**, or Print/PDF. Includes client phone/email/address. Open punches list as “Still open” and are **excluded from billed hour totals**.
+- **Export (timecard)** — filter by contact and/or job; CSV, **ZIP + photos**, Print/PDF, or (with a contact selected) **Download invoice PDF**. Invoice groups closed punches by job × rate; contacts without a rate get a hours-only statement. Open punches list as “Still open” and are **excluded from billed hour totals**.
 - **Full backup** — separate from the timecard ZIP. Downloads every contact, job, punch, day note, and photo blob; restore replaces all local data. Use the Job Snap download as-is (STORE ZIP).
 - **PWA** — installable; service worker caches the shell for offline use of home, notes, and export.
 
@@ -39,7 +39,7 @@ npm run build
 npm run test:e2e
 ```
 
-Playwright smoke covers Continue / Switch / Reopen, Today’s note, punch edit, export ZIP, and backup round-trip. There is no GitHub Actions workflow in this repo yet — run e2e locally (or in CI after adding a workflow).
+Playwright smoke covers Continue / Switch / Reopen, Today’s note, punch edit, export ZIP, invoice PDF download (with rate), and backup round-trip. There is no GitHub Actions workflow in this repo yet — run e2e locally (or in CI after adding a workflow).
 
 ## Notes
 
