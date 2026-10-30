@@ -205,7 +205,7 @@ test.describe("Job Snap smoke", () => {
     await openContact(page, "Alpha Client");
     await page.getByRole("button", { name: "Edit contact" }).click();
     await page.locator("#edit-hourlyRate").fill("85");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Contact saved")).toBeVisible();
 
     // ── Export ZIP + invoice PDF (filtered) ──
