@@ -9,6 +9,7 @@ import {
   Briefcase,
   Check,
   ChevronRight,
+  MapPin,
   Pencil,
   Play,
   Plus,
@@ -27,6 +28,7 @@ import {
   updateJob,
   switchPunchToJob,
 } from "@/lib/db";
+import { mapsDirectionsUrl } from "@/lib/export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -218,6 +220,7 @@ export default function ContactPage({
     [contact.phone, contact.email, contact.address]
       .filter(Boolean)
       .join(" · ") || "Contact folder";
+  const directionsUrl = mapsDirectionsUrl(contact.address);
 
   return (
     <div className="space-y-5">
@@ -254,6 +257,23 @@ export default function ContactPage({
           <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
       </div>
+
+      {directionsUrl && !editing ? (
+        <a
+          href={directionsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium text-[oklch(0.32_0.05_155)] shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
+        >
+          <MapPin className="h-4 w-4 shrink-0" />
+          <span className="min-w-0">
+            <span className="block">Get directions</span>
+            <span className="block truncate text-xs font-normal text-muted-foreground">
+              {contact.address}
+            </span>
+          </span>
+        </a>
+      ) : null}
 
       {savedFlash ? (
         <p className="flex items-center gap-1.5 text-sm text-[oklch(0.42_0.08_155)]">
