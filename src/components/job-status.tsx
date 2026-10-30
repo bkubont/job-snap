@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage, notify } from "@/components/feedback";
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -52,7 +53,7 @@ export function StatusPicker({
       await updateJobFields(jobId, { status: next });
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not change status");
+      notify.error(errorMessage(e, "Could not change status"));
     } finally {
       setSaving(false);
     }
@@ -62,7 +63,9 @@ export function StatusPicker({
     <label
       className={cn(
         "relative inline-flex shrink-0 items-center rounded-full font-semibold",
-        size === "md" ? "h-9 pl-3 pr-8 text-sm" : "h-8 pl-2.5 pr-7 text-xs",
+        size === "md"
+          ? "h-9 pl-3 pr-8 text-sm pointer-coarse:h-11"
+          : "h-8 pl-2.5 pr-7 text-xs pointer-coarse:h-10",
         STATUS_BADGE_CLASS[status],
         saving && "opacity-60",
         className,

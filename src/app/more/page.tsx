@@ -37,7 +37,7 @@ const items = [
 export default function MorePage() {
   return (
     <div className="space-y-4">
-      <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+      <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
         More
       </h1>
       <ul className="space-y-2">
@@ -45,7 +45,7 @@ export default function MorePage() {
           <li key={href}>
             <Link
               href={href}
-              className="flex min-h-16 items-center gap-3 rounded-2xl bg-white/70 px-4 py-3 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
+              className="flex min-h-16 items-center gap-3 rounded-2xl bg-white/70 px-4 py-3 shadow-sm ring-1 ring-hairline transition hover:bg-white"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[oklch(0.93_0.02_95)] text-[oklch(0.35_0.05_155)]">
                 <Icon className="h-5 w-5" />

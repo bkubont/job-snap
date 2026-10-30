@@ -1,5 +1,6 @@
 "use client";
 
+import { errorMessage, notify } from "@/components/feedback";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -81,7 +82,7 @@ export default function DashboardPage() {
       await punchOut(active.punch.id);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not clock out");
+      notify.error(errorMessage(e, "Could not clock out"));
     } finally {
       setBusy(false);
     }
@@ -93,7 +94,7 @@ export default function DashboardPage() {
       await switchPunchToJob(job.id);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not clock in");
+      notify.error(errorMessage(e, "Could not clock in"));
     } finally {
       setBusyJobId(null);
     }
@@ -108,7 +109,7 @@ export default function DashboardPage() {
       {/* Today's work */}
       <section
         aria-label="Today's work"
-        className="rounded-[1.5rem] bg-[oklch(0.32_0.05_155)] p-5 text-[oklch(0.97_0.02_95)] shadow-sm"
+        className="rounded-[1.5rem] bg-primary p-5 text-primary-foreground shadow-sm"
       >
         <div className="flex items-baseline justify-between gap-3">
           <p className="text-sm text-[oklch(0.9_0.03_95_/0.8)]">Today</p>
@@ -144,7 +145,7 @@ export default function DashboardPage() {
               size="lg"
               disabled={busy}
               onClick={onPunchOut}
-              className="h-12 w-full bg-[oklch(0.82_0.12_75)] text-base text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
+              className="h-12 w-full bg-clock text-base text-clock-foreground hover:bg-clock-hover"
             >
               <Square className="h-4 w-4" />
               Clock out
@@ -157,7 +158,7 @@ export default function DashboardPage() {
               size="lg"
               disabled={loading}
               onClick={() => (jobs.length ? setPicker("clock") : setAddJobOpen(true))}
-              className="h-12 w-full bg-[oklch(0.82_0.12_75)] text-base text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
+              className="h-12 w-full bg-clock text-base text-clock-foreground hover:bg-clock-hover"
             >
               <Play className="h-4 w-4" />
               Clock in
@@ -167,8 +168,8 @@ export default function DashboardPage() {
       </section>
 
       {isEmpty ? (
-        <section className="space-y-3 rounded-2xl bg-white/70 p-5 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
-          <h1 className="font-heading text-xl font-semibold text-[oklch(0.28_0.04_155)]">
+        <section className="space-y-3 rounded-2xl bg-white/70 p-5 ring-1 ring-hairline">
+          <h1 className="font-heading text-xl font-semibold text-ink">
             Welcome to Job Snap
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -244,17 +245,20 @@ export default function DashboardPage() {
       {recent.length > 0 ? (
         <section className="space-y-2">
           <div className="flex items-baseline justify-between">
-            <h2 className="font-heading text-lg font-semibold text-[oklch(0.28_0.04_155)]">
+            <h2 className="font-heading text-lg font-semibold text-ink">
               Recent jobs
             </h2>
-            <Link href="/jobs" className="text-sm font-medium text-[oklch(0.4_0.05_155)]">
+            <Link
+              href="/jobs"
+              className="-my-2 inline-flex min-h-10 items-center px-1 text-sm font-medium text-[oklch(0.4_0.05_155)]"
+            >
               All jobs
             </Link>
           </div>
           <ul className="space-y-2">
             {recent.map(({ job, contact, isActive, lastActivityAt }) => (
               <li key={job.id}>
-                <div className="flex items-center gap-2 rounded-2xl bg-white/70 p-1.5 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+                <div className="flex items-center gap-2 rounded-2xl bg-white/70 p-1.5 shadow-sm ring-1 ring-hairline">
                   <Link
                     href={`/jobs/${job.id}`}
                     className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-xl px-2.5 py-2"
@@ -306,7 +310,7 @@ export default function DashboardPage() {
       {/* Job summary */}
       {jobs.length > 0 ? (
         <section className="space-y-2">
-          <h2 className="font-heading text-lg font-semibold text-[oklch(0.28_0.04_155)]">
+          <h2 className="font-heading text-lg font-semibold text-ink">
             Jobs by status
           </h2>
           <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -314,7 +318,7 @@ export default function DashboardPage() {
               <li key={s}>
                 <Link
                   href={`/jobs?status=${s}`}
-                  className="flex min-h-14 items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2.5 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+                  className="flex min-h-14 items-center justify-between gap-2 rounded-xl bg-white/70 px-3 py-2.5 ring-1 ring-hairline"
                 >
                   <span
                     className={cn(
@@ -374,7 +378,7 @@ function QuickAction({
   onClick?: () => void;
 }) {
   const className =
-    "flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-2xl bg-white/70 px-2 py-3 text-center text-xs font-medium text-[oklch(0.28_0.04_155)] shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white";
+    "flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 rounded-2xl bg-white/70 px-2 py-3 text-center text-xs font-medium text-ink shadow-sm ring-1 ring-hairline transition hover:bg-white";
   const content = (
     <>
       <Icon className="h-5 w-5 text-[oklch(0.4_0.06_155)]" />

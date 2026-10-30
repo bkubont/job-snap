@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm, errorMessage, notify } from "@/components/feedback";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Camera, Trash2, ImagePlus, Pencil, X } from "lucide-react";
@@ -205,7 +206,7 @@ function PhotoLightbox({
                 size="sm"
                 disabled={saving}
                 onClick={() => void save()}
-                className="bg-[oklch(0.82_0.12_75)] text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]"
+                className="bg-clock text-clock-foreground hover:bg-clock-hover"
               >
                 {saving ? "Saving…" : "Save"}
               </Button>
@@ -293,7 +294,7 @@ export function PhotoGallery({
             : "Unknown error.";
       // Keep only the unsaved files in the prompt so Save retries just those.
       setCaptionPrompt({ files: files.slice(saved) });
-      alert(
+      notify.error(
         `Saved ${saved} of ${files.length} photo${files.length === 1 ? "" : "s"}. ${reason}`,
       );
     } finally {
@@ -303,13 +304,21 @@ export function PhotoGallery({
   }
 
   async function onDelete(id: string) {
-    if (!confirm("Delete this photo? This can't be undone.")) return;
+    if (
+      !(await askConfirm({
+        title: "Delete this photo?",
+        body: "The original file is removed from this device. This can't be undone.",
+        confirmLabel: "Delete photo",
+        destructive: true,
+      }))
+    )
+      return;
     try {
       await deletePhoto(id);
       if (lightboxId === id) setLightboxId(null);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not delete photo");
+      notify.error(errorMessage(e, "Could not delete photo"));
     }
   }
 
@@ -318,7 +327,7 @@ export function PhotoGallery({
       await updatePhoto(id, { category: next });
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not change category");
+      notify.error(errorMessage(e, "Could not change category"));
     }
   }
 
@@ -327,7 +336,7 @@ export function PhotoGallery({
       await updatePhotoCaption(id, caption);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not save caption");
+      notify.error(errorMessage(e, "Could not save caption"));
       throw e;
     }
   }
@@ -335,7 +344,7 @@ export function PhotoGallery({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-heading text-lg font-semibold text-[oklch(0.28_0.04_155)]">
+        <h2 className="font-heading text-lg font-semibold text-ink">
           Photos
         </h2>
         <div className="flex gap-2">
@@ -354,7 +363,7 @@ export function PhotoGallery({
             size="sm"
             disabled={busy}
             onClick={() => cameraRef.current?.click()}
-            className="bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] hover:bg-[oklch(0.28_0.05_155)]"
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <Camera className="h-4 w-4" />
             Take
@@ -383,7 +392,7 @@ export function PhotoGallery({
         <button
           type="button"
           onClick={() => cameraRef.current?.click()}
-          className="flex w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] bg-[oklch(0.96_0.01_95)] px-4 py-10 text-sm text-muted-foreground transition hover:border-[oklch(0.45_0.04_155_/0.55)]"
+          className="flex w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-placeholder-line bg-[oklch(0.96_0.01_95)] px-4 py-10 text-sm text-muted-foreground transition hover:border-[oklch(0.45_0.04_155_/0.55)]"
         >
           <Camera className="h-7 w-7 text-[oklch(0.45_0.05_155)]" />
           Snap a site photo — it stays with this job
@@ -402,9 +411,9 @@ export function PhotoGallery({
               aria-pressed={filter === c}
               onClick={() => setFilter(c)}
               className={cn(
-                "h-9 shrink-0 rounded-full px-3.5 text-sm font-medium ring-1 transition",
+                "h-9 pointer-coarse:h-10 shrink-0 rounded-full px-3.5 text-sm font-medium ring-1 transition",
                 filter === c
-                  ? "bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] ring-transparent"
+                  ? "bg-primary text-primary-foreground ring-transparent"
                   : "bg-white/70 ring-[oklch(0.35_0.03_155_/0.15)]",
               )}
             >
@@ -460,7 +469,7 @@ export function PhotoGallery({
                   className={cn(
                     "h-11 rounded-lg text-sm font-medium ring-1 transition",
                     category === c
-                      ? "bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] ring-transparent"
+                      ? "bg-primary text-primary-foreground ring-transparent"
                       : "bg-white ring-[oklch(0.35_0.03_155_/0.2)]",
                   )}
                 >
@@ -497,7 +506,7 @@ export function PhotoGallery({
               type="button"
               disabled={busy}
               onClick={() => void saveWithCaption(false)}
-              className="bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] hover:bg-[oklch(0.28_0.05_155)]"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {busy ? "Saving…" : "Save photo"}
             </Button>

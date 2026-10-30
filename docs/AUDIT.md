@@ -201,3 +201,18 @@ Agreed decisions: existing **open → In Progress** and **closed → Completed**
 - Real-device checks (iPhone Safari and the home-screen app, desktop Safari), including the D9/D10 items from Phase 2.
 - Lint: 4 errors remain, all the older set-state-in-effect pattern (contact page, Export, install prompt).
 - Phase 4 visual refinement (type scale and spacing tokens, replacing remaining `alert()`s with inline messages and toasts).
+
+---
+
+## 10. Phase 4 status (mobile and visual refinement)
+
+- **No more browser pop-ups.** All 21 `alert()` calls are now non-blocking in-app messages (`notify` in `src/components/feedback.tsx`). They sit above the bottom nav, errors are announced to screen readers, and they can be tapped to dismiss. All 6 `confirm()` calls are now a styled confirmation dialog (`askConfirm`) that names exactly what will be deleted, with a red destructive button and Cancel as the default way out. One success message was added where a dialog closes with no other visible result ("<name> added").
+- **Touch targets.** On touch screens (`pointer-coarse`), buttons, inputs, status pickers and filter chips grow to at least 40–48 px; desktop keeps the compact sizes. The Export page's dropdowns use 16 px text on phones, so iPhone no longer zooms when one is opened. A new automated check fails if any visible control on 11 key screens is shorter than 40 px on a touch phone.
+- **Design tokens.** Repeated colour values are now named theme colours (`ink`, `clock`, `clock-hover`, `clock-foreground`, `hairline`, `placeholder-line`); 92 copies were replaced. The values are identical, so the look is unchanged but consistent.
+- **Code health.** **Lint is clean: 0 errors, 0 warnings** (it was 7 errors at the audit). The set-state-on-mount patterns were replaced with values derived during render. The Export page's default dates no longer read the clock during server pre-render.
+- **Tests:** 14 of 14 tests pass on 3 consecutive runs. New this phase: the in-app delete confirmation (Cancel keeps data; no native dialogs) and the touch-target check.
+
+### Remaining limitations
+- **Not yet tested on a real device:** iPhone Safari, the installed home-screen app, and desktop Safari. That includes the iOS download fix, a large-backup stress test, save on swipe-away, and whether iOS honours persistent storage.
+- **No syncing:** data stays on the device it was entered on; moving between devices is by backup and restore.
+- **No dark mode:** the app uses a single light theme.

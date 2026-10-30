@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm, errorMessage, notify } from "@/components/feedback";
 import { Suspense, use, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -154,7 +155,7 @@ function JobWorkspace({ id }: { id: string }) {
       await action();
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : failMsg);
+      notify.error(errorMessage(e, failMsg));
     } finally {
       setBusy(false);
     }
@@ -162,11 +163,14 @@ function JobWorkspace({ id }: { id: string }) {
 
   async function onDelete() {
     if (
-      !confirm(
-        `Delete "${job!.title}" with its ${punches.length} time entr${
+      !(await askConfirm({
+        title: `Delete "${job!.title}"?`,
+        body: `This removes the job with its ${punches.length} time entr${
           punches.length === 1 ? "y" : "ies"
-        } and ${photos.length} photo${photos.length === 1 ? "" : "s"}? This can't be undone.`,
-      )
+        } and ${photos.length} photo${photos.length === 1 ? "" : "s"}. This can't be undone — make a full backup first if unsure.`,
+        confirmLabel: "Delete job",
+        destructive: true,
+      }))
     )
       return;
     try {
@@ -174,14 +178,12 @@ function JobWorkspace({ id }: { id: string }) {
       refreshSitefold();
       router.push(`/contacts/${job!.contactId}`);
     } catch (e) {
-      alert(
-        e instanceof Error ? `Nothing was deleted: ${e.message}` : "Nothing was deleted.",
-      );
+      notify.error(`Nothing was deleted. ${errorMessage(e, "")}`.trim());
     }
   }
 
   const clockButtonClass =
-    "h-12 w-full bg-[oklch(0.82_0.12_75)] text-base text-[oklch(0.25_0.04_155)] hover:bg-[oklch(0.78_0.12_75)]";
+    "h-12 w-full bg-clock text-base text-clock-foreground hover:bg-clock-hover";
 
   return (
     <div className="space-y-5">
@@ -199,7 +201,7 @@ function JobWorkspace({ id }: { id: string }) {
           >
             {contact.name}
           </Link>
-          <h1 className="font-heading text-2xl font-semibold leading-tight tracking-tight text-[oklch(0.28_0.04_155)]">
+          <h1 className="font-heading text-2xl font-semibold leading-tight tracking-tight text-ink">
             {job.title}
           </h1>
           <div className="mt-2">
@@ -231,7 +233,7 @@ function JobWorkspace({ id }: { id: string }) {
       ) : null}
 
       {/* Clock — always visible */}
-      <section className="rounded-[1.5rem] bg-[oklch(0.32_0.05_155)] p-5 text-[oklch(0.97_0.02_95)] shadow-sm">
+      <section className="rounded-[1.5rem] bg-primary p-5 text-primary-foreground shadow-sm">
         {isActiveHere ? (
           <div className="space-y-3">
             <p className="font-heading text-2xl font-semibold">On the clock</p>
@@ -328,7 +330,7 @@ function JobWorkspace({ id }: { id: string }) {
             className={cn(
               "h-10 shrink-0 rounded-full px-4 text-sm font-medium transition",
               tab === t
-                ? "bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)]"
+                ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-black/5",
             )}
           >
@@ -375,7 +377,7 @@ function OverviewTab({
   const row = "flex min-h-12 items-start gap-3 px-4 py-3";
   return (
     <div className="space-y-4">
-      <dl className="divide-y divide-black/5 rounded-2xl bg-white/70 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+      <dl className="divide-y divide-black/5 rounded-2xl bg-white/70 text-sm ring-1 ring-hairline">
         <div className={row}>
           <dt className="w-24 shrink-0 text-muted-foreground">Customer</dt>
           <dd className="min-w-0 flex-1 font-medium">
@@ -388,7 +390,10 @@ function OverviewTab({
           <dt className="w-24 shrink-0 text-muted-foreground">Phone</dt>
           <dd className="min-w-0 flex-1">
             {phoneHref ? (
-              <a href={phoneHref} className="inline-flex items-center gap-1.5 font-medium text-[oklch(0.35_0.06_155)]">
+              <a
+                href={phoneHref}
+                className="-my-2.5 inline-flex min-h-10 items-center gap-1.5 font-medium text-[oklch(0.35_0.06_155)]"
+              >
                 <Phone className="h-3.5 w-3.5" />
                 {contact.phone}
               </a>
@@ -411,7 +416,7 @@ function OverviewTab({
                     href={directions}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1.5 font-medium text-[oklch(0.35_0.06_155)]"
+                    className="inline-flex min-h-10 items-center gap-1.5 font-medium text-[oklch(0.35_0.06_155)]"
                   >
                     <MapPin className="h-3.5 w-3.5" />
                     Get directions
@@ -634,11 +639,14 @@ function TimeTab({
 
   async function onDeletePunch(punch: Punch) {
     if (
-      !confirm(
-        `Delete the ${formatDuration(punch.punchedInAt, punch.punchedOutAt)} entry from ${formatDateTime(
+      !(await askConfirm({
+        title: "Delete this time entry?",
+        body: `${formatDuration(punch.punchedInAt, punch.punchedOutAt)} from ${formatDateTime(
           punch.punchedInAt,
-        )}? It will be noted in the job history.`,
-      )
+        )}. The deletion is noted in the job history.`,
+        confirmLabel: "Delete entry",
+        destructive: true,
+      }))
     ) {
       return;
     }
@@ -647,7 +655,7 @@ function TimeTab({
       refreshSitefold();
       if (editing?.id === punch.id) setEditing(null);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not delete entry");
+      notify.error(errorMessage(e, "Could not delete entry"));
     }
   }
 
@@ -663,7 +671,7 @@ function TimeTab({
         </Button>
       </div>
       {punches.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] px-4 py-8 text-center text-sm text-muted-foreground">
+        <p className="rounded-2xl border border-dashed border-placeholder-line px-4 py-8 text-center text-sm text-muted-foreground">
           No time recorded yet. Clock in above, or add time you forgot to record.
         </p>
       ) : (
@@ -671,7 +679,7 @@ function TimeTab({
           {punches.map((p) => (
             <li
               key={p.id}
-              className="flex items-center gap-2 rounded-xl bg-white/70 py-2 pr-1 pl-3.5 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+              className="flex items-center gap-2 rounded-xl bg-white/70 py-2 pr-1 pl-3.5 text-sm ring-1 ring-hairline"
             >
               <div className="min-w-0 flex-1">
                 <p className="font-medium">
@@ -809,19 +817,27 @@ function NotesTab({ job }: { job: Job }) {
       setLogText("");
       refreshSitefold();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not add note");
+      notify.error(errorMessage(err, "Could not add note"));
     } finally {
       setLogBusy(false);
     }
   }
 
   async function removeLog(eventId: string) {
-    if (!confirm("Delete this dated note? This can't be undone.")) return;
+    if (
+      !(await askConfirm({
+        title: "Delete this dated note?",
+        body: "This can't be undone.",
+        confirmLabel: "Delete note",
+        destructive: true,
+      }))
+    )
+      return;
     try {
       await deleteJobLogNote(job.id, eventId);
       refreshSitefold();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not delete note");
+      notify.error(errorMessage(err, "Could not delete note"));
     }
   }
 
@@ -866,7 +882,7 @@ function NotesTab({ job }: { job: Job }) {
             {logNotes.map((e) => (
               <li
                 key={e.id}
-                className="flex items-start gap-2 rounded-xl bg-white/70 py-2.5 pr-1 pl-3.5 text-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+                className="flex items-start gap-2 rounded-xl bg-white/70 py-2.5 pr-1 pl-3.5 text-sm ring-1 ring-hairline"
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-muted-foreground">{formatDateTime(e.at)}</p>

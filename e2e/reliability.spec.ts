@@ -419,3 +419,87 @@ test("invoice rounding applies only to the invoice and keeps recorded time", asy
     new Date(base + 52 * 60_000).toISOString(),
   );
 });
+
+test("deleting a job asks in-app; Cancel keeps it, Delete removes it with its entries", async ({
+  page,
+}) => {
+  const nativeDialogs: string[] = [];
+  page.on("dialog", (d) => nativeDialogs.push(d.message()));
+  await resetAndSeed(page, {
+    contacts: [contact],
+    jobs: [job("jDel", "Job to delete")],
+    punches: [
+      {
+        id: "dp",
+        jobId: "jDel",
+        punchedInAt: "2026-10-06T08:00:00.000Z",
+        punchedOutAt: "2026-10-06T09:00:00.000Z",
+      },
+    ],
+  });
+  await page.goto("/jobs/jDel");
+  await page.getByRole("button", { name: "Delete job" }).click();
+  const confirmDialog = page.getByRole("dialog");
+  await expect(confirmDialog.getByRole("heading", { name: 'Delete "Job to delete"?' })).toBeVisible();
+  await expect(confirmDialog).toContainText("1 time entry and 0 photos");
+  await confirmDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirmDialog).toBeHidden();
+  expect(await readPunches(page)).toHaveLength(1);
+
+  await page.getByRole("button", { name: "Delete job" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete job" }).click();
+  await expect(page).toHaveURL(/\/contacts\/c1$/);
+  expect(await readPunches(page)).toHaveLength(0);
+  expect(nativeDialogs).toEqual([]);
+});
+
+test("controls are at least 40px tall on a touch phone", async ({ page }) => {
+  await resetAndSeed(page, {
+    contacts: [{ ...contact, phone: "555-0100", address: "1 Main St" }],
+    jobs: [job("jT", "Touch job")],
+    punches: [
+      {
+        id: "tp",
+        jobId: "jT",
+        punchedInAt: "2026-10-06T08:00:00.000Z",
+        punchedOutAt: "2026-10-06T09:00:00.000Z",
+      },
+    ],
+  });
+  const found: string[] = [];
+  for (const path of [
+    "/",
+    "/contacts",
+    "/contacts/c1",
+    "/jobs",
+    "/jobs/jT",
+    "/jobs/jT?tab=time",
+    "/time",
+    "/more",
+    "/settings",
+    "/notes",
+    "/export",
+  ]) {
+    await page.goto(path);
+    await expect(page.locator("main")).not.toContainText("Loading…");
+    const small = await page.evaluate(() =>
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          "main button, main a[href], main input:not([type=file]):not([type=checkbox]), main select, nav a",
+        ),
+      ]
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          // Skip hidden elements and inline text links inside sentences.
+          if (!r.width || !r.height || style.visibility === "hidden") return false;
+          if (el.tagName === "A" && style.display === "inline") return false;
+          if (el.closest("[hidden], [aria-hidden=true], details:not([open])")) return false;
+          return r.height < 40;
+        })
+        .map((el) => `${el.tagName} "${(el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 30)}" ${Math.round(el.getBoundingClientRect().height)}px`),
+    );
+    found.push(...small.map((x) => `${path}: ${x}`));
+  }
+  expect(found).toEqual([]);
+});

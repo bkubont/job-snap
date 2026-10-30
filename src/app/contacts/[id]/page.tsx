@@ -1,6 +1,7 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { askConfirm, errorMessage, notify } from "@/components/feedback";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -101,11 +102,6 @@ export default function ContactPage({
     hourlyRate: "",
   });
 
-  useEffect(() => {
-    if (!contact || editing) return;
-    setEditForm(contactToEditForm(contact));
-  }, [contact, editing]);
-
   if (contact === undefined) {
     return error ? (
       <LoadError error={error} onRetry={retry} what="this contact" />
@@ -126,11 +122,14 @@ export default function ContactPage({
 
   async function onDelete() {
     if (
-      !confirm(
-        `Delete ${contact!.name} and all ${jobs.length} job${
+      !(await askConfirm({
+        title: `Delete ${contact!.name}?`,
+        body: `This removes the contact and all ${jobs.length} job${
           jobs.length === 1 ? "" : "s"
-        } inside, with every punch and photo? This can't be undone.`,
-      )
+        }, with every time entry and photo. This can't be undone — make a full backup first if unsure.`,
+        confirmLabel: "Delete contact",
+        destructive: true,
+      }))
     ) {
       return;
     }
@@ -139,11 +138,7 @@ export default function ContactPage({
       refreshSitefold();
       router.push("/");
     } catch (e) {
-      alert(
-        e instanceof Error
-          ? `Nothing was deleted: ${e.message}`
-          : "Nothing was deleted.",
-      );
+      notify.error(`Nothing was deleted. ${errorMessage(e, "")}`.trim());
     }
   }
 
@@ -153,7 +148,7 @@ export default function ContactPage({
       await switchPunchToJob(jobId);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not clock in");
+      notify.error(errorMessage(e, "Could not clock in"));
     } finally {
       setBusyJobId(null);
     }
@@ -189,7 +184,7 @@ export default function ContactPage({
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 2000);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not save contact");
+      notify.error(errorMessage(err, "Could not save contact"));
     } finally {
       setSaving(false);
     }
@@ -211,7 +206,7 @@ export default function ContactPage({
           </Link>
         </Button>
         <div className="min-w-0 flex-1">
-          <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
             {contact.name}
           </h1>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">
@@ -264,7 +259,7 @@ export default function ContactPage({
           href={directionsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium text-[oklch(0.32_0.05_155)] shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)] transition hover:bg-white"
+          className="flex items-center gap-2 rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium text-[oklch(0.32_0.05_155)] shadow-sm ring-1 ring-hairline transition hover:bg-white"
         >
           <MapPin className="h-4 w-4 shrink-0" />
           <span className="min-w-0">
@@ -286,7 +281,7 @@ export default function ContactPage({
       {editing ? (
         <form
           onSubmit={onSaveContact}
-          className="space-y-3 rounded-2xl bg-white/70 px-4 py-4 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]"
+          className="space-y-3 rounded-2xl bg-white/70 px-4 py-4 shadow-sm ring-1 ring-hairline"
         >
           <div className="flex items-center justify-between gap-2">
             <p className="font-heading text-sm font-semibold">Edit contact</p>
@@ -388,7 +383,7 @@ export default function ContactPage({
           </div>
         </form>
       ) : contact.notes ? (
-        <p className="rounded-2xl bg-white/60 px-4 py-3 text-sm leading-relaxed ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+        <p className="rounded-2xl bg-white/60 px-4 py-3 text-sm leading-relaxed ring-1 ring-hairline">
           {contact.notes}
         </p>
       ) : null}
@@ -414,7 +409,7 @@ export default function ContactPage({
       />
 
       {jobs.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] px-5 py-10 text-center">
+        <div className="rounded-2xl border border-dashed border-placeholder-line px-5 py-10 text-center">
           <Briefcase className="mx-auto h-7 w-7 text-[oklch(0.45_0.05_155)]" />
           <p className="mt-2 text-sm text-muted-foreground">
             No jobs yet. Each job gets its own time, photos and notes.
@@ -427,7 +422,7 @@ export default function ContactPage({
             const switchMode = !!active && !isHere;
             return (
               <li key={job.id}>
-                <div className="relative flex items-center gap-2 rounded-2xl bg-white/70 p-1.5 pl-3.5 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+                <div className="relative flex items-center gap-2 rounded-2xl bg-white/70 p-1.5 pl-3.5 shadow-sm ring-1 ring-hairline">
                   <Link
                     href={`/jobs/${job.id}`}
                     className="min-w-0 flex-1 py-2 after:absolute after:inset-0 after:rounded-2xl"

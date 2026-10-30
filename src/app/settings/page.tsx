@@ -35,7 +35,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-baseline justify-between">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight text-[oklch(0.28_0.04_155)]">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
           Settings
         </h1>
         <span role="status" className="text-xs font-medium text-muted-foreground">
@@ -43,7 +43,7 @@ export default function SettingsPage() {
         </span>
       </div>
 
-      <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+      <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-hairline">
         <h2 className="font-heading text-lg font-semibold">Invoice rounding</h2>
         <p className="text-sm text-muted-foreground">
           Applies to invoice PDFs only, per time entry. Your recorded times,
@@ -92,7 +92,7 @@ export default function SettingsPage() {
         </p>
       </section>
 
-      <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+      <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-hairline">
         <h2 className="font-heading text-lg font-semibold">Weekly totals</h2>
         <div className="space-y-1.5">
           <Label htmlFor="week-start">Week starts on</Label>
