@@ -1,5 +1,4 @@
 import {
-  differenceInMinutes,
   format,
   formatDistanceStrict,
   parseISO,
@@ -22,18 +21,26 @@ export function formatDateTime(iso: string) {
   return format(parseISO(iso), "MMM d, yyyy · h:mm a");
 }
 
+/**
+ * Exact elapsed minutes (fractional). Totals must sum these unrounded values;
+ * round only when displaying, so short punches never silently count as zero.
+ */
 export function durationMinutes(startIso: string, endIso: string | null) {
   const end = endIso ? parseISO(endIso) : new Date();
-  return Math.max(0, differenceInMinutes(end, parseISO(startIso)));
+  return Math.max(0, (end.getTime() - parseISO(startIso).getTime()) / 60000);
 }
 
-export function formatDuration(startIso: string, endIso: string | null) {
-  const end = endIso ? parseISO(endIso) : new Date();
-  const mins = Math.max(0, differenceInMinutes(end, parseISO(startIso)));
+/** Display label for a minute total, e.g. "45m" or "2h 5m" (rounded to the nearest minute). */
+export function formatMinutes(totalMinutes: number) {
+  const mins = Math.round(totalMinutes);
   if (mins < 60) return `${mins}m`;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+export function formatDuration(startIso: string, endIso: string | null) {
+  return formatMinutes(durationMinutes(startIso, endIso));
 }
 
 export function formatElapsedLive(startIso: string) {

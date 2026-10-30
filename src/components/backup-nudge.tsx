@@ -36,7 +36,7 @@ export function BackupNudge() {
       <div className="mx-auto flex max-w-lg items-start gap-2">
         <HardDriveDownload className="mt-0.5 h-4 w-4 shrink-0 text-[oklch(0.42_0.08_75)]" />
         <p className="min-w-0 flex-1 text-xs leading-snug text-[oklch(0.28_0.04_155)]">
-          You have punches stored only on this device.{" "}
+          Your time records are stored only on this device.{" "}
           <Link
             href="/export#full-backup"
             className="font-semibold underline underline-offset-2"

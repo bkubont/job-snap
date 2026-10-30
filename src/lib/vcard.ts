@@ -278,6 +278,38 @@ export function parseContactImportFile(
   return { contacts: [], kind: "unknown" };
 }
 
+/** Digits only, ignoring a leading US country code: "+1 (555) 123-4567" → "5551234567". */
+export function normalizePhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+}
+
+function normalizeName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Exact-duplicate key for imports (same name and same phone number, ignoring
+ * formatting). Matching contacts are skipped, never merged.
+ */
 export function contactDedupeKey(c: { name: string; phone: string }) {
-  return c.name.toLowerCase() + "|" + c.phone;
+  return normalizeName(c.name) + "|" + normalizePhone(c.phone);
+}
+
+/**
+ * Existing contacts that may be the same person: same phone number, same
+ * email, or same name. For review only — never merged automatically.
+ */
+export function findPossibleDuplicates<
+  T extends { name: string; phone: string; email: string },
+>(candidate: { name: string; phone: string; email: string }, existing: T[]) {
+  const name = normalizeName(candidate.name);
+  const phone = normalizePhone(candidate.phone);
+  const email = candidate.email.trim().toLowerCase();
+  return existing.filter(
+    (c) =>
+      (name && normalizeName(c.name) === name) ||
+      (phone.length >= 7 && normalizePhone(c.phone) === phone) ||
+      (email && c.email.trim().toLowerCase() === email),
+  );
 }

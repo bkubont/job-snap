@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect } from "react";
+import { requestPersistentStorage } from "@/lib/db";
 
-/** Registers the app-shell service worker (does not touch IndexedDB). */
+/**
+ * Registers the app-shell service worker (does not touch IndexedDB) and asks
+ * the browser to keep Job Snap's stored data instead of evicting it.
+ */
 export function PwaRegister() {
+  useEffect(() => {
+    void requestPersistentStorage();
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Suspense } from "react";
 import { DM_Sans, Fraunces } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
@@ -17,7 +16,7 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Job Snap — contacts, jobs, time clock",
   description:
-    "Turn phone contacts into job folders. Punch in and out, take photos, write daily notes, and export your time clock.",
+    "Customers, jobs, time clock, photos and notes for field work — export timecards and back up everything.",
   applicationName: "Job Snap",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
@@ -39,7 +38,7 @@ export const viewport: Viewport = {
   themeColor: "#2a4036",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
+  // No maximumScale: pinch-zoom must stay available for readability.
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -49,15 +48,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${dmSans.variable} ${fraunces.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
-        <Suspense
-          fallback={
-            <div className="flex min-h-full items-center justify-center p-8 text-sm text-muted-foreground">
-              Loading Job Snap…
-            </div>
-          }
-        >
-          <AppShell>{children}</AppShell>
-        </Suspense>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

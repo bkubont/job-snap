@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Camera, Trash2, ImagePlus, Pencil, X } from "lucide-react";
-import type { Photo } from "@/lib/types";
-import { addPhoto, deletePhoto, updatePhotoCaption } from "@/lib/db";
+import { PHOTO_CATEGORIES, type Photo, type PhotoCategory } from "@/lib/types";
+import { addPhoto, deletePhoto, updatePhoto, updatePhotoCaption } from "@/lib/db";
+import { PHOTO_CATEGORY_LABEL } from "@/lib/status";
+import { cn } from "@/lib/utils";
 import { refreshSitefold } from "@/hooks/use-sitefold";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +47,9 @@ function PhotoThumb({
         alt={photo.caption || "Job photo"}
         className="aspect-[4/3] w-full object-cover transition group-hover:scale-[1.02]"
       />
+      <span className="absolute top-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white">
+        {PHOTO_CATEGORY_LABEL[photo.category ?? "other"]}
+      </span>
       <span className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-gradient-to-t from-black/70 to-transparent p-2.5 pt-8 text-[11px] text-white">
         <span>{formatDateTime(photo.createdAt)}</span>
         {photo.caption ? (
@@ -62,11 +67,13 @@ function PhotoLightbox({
   onClose,
   onDelete,
   onSaveCaption,
+  onChangeCategory,
 }: {
   photo: Photo;
   onClose: () => void;
   onDelete: () => void;
   onSaveCaption: (caption: string) => Promise<void>;
+  onChangeCategory: (category: PhotoCategory) => Promise<void>;
 }) {
   const url = useMemo(() => URL.createObjectURL(photo.blob), [photo.blob]);
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
@@ -101,9 +108,23 @@ function PhotoLightbox({
       aria-label="Photo viewer"
     >
       <div className="flex items-center justify-between gap-2 px-3 py-3 text-white">
-        <p className="min-w-0 truncate text-sm text-white/80">
-          {formatDateTime(photo.createdAt)}
-        </p>
+        <div className="flex min-w-0 items-center gap-2">
+          <select
+            aria-label="Photo category"
+            value={photo.category ?? "other"}
+            onChange={(e) => void onChangeCategory(e.target.value as PhotoCategory)}
+            className="h-9 rounded-lg border border-white/20 bg-white/10 px-2 text-sm text-white"
+          >
+            {PHOTO_CATEGORIES.map((c) => (
+              <option key={c} value={c} className="text-black">
+                {PHOTO_CATEGORY_LABEL[c]}
+              </option>
+            ))}
+          </select>
+          <p className="min-w-0 truncate text-sm text-white/80">
+            {formatDateTime(photo.createdAt)}
+          </p>
+        </div>
         <div className="flex shrink-0 items-center gap-1">
           <Button
             type="button"
@@ -224,6 +245,17 @@ export function PhotoGallery({
   } | null>(null);
   const [pendingCaption, setPendingCaption] = useState("");
   const [lightboxId, setLightboxId] = useState<string | null>(null);
+  // First photo on a job is usually "Before"; afterwards keep the last choice.
+  const [chosenCategory, setCategory] = useState<PhotoCategory | null>(null);
+  const category: PhotoCategory = chosenCategory ?? (photos.length ? "during" : "before");
+  const [filter, setFilter] = useState<PhotoCategory | "all">("all");
+  const counts = useMemo(() => {
+    const c = { before: 0, during: 0, after: 0, other: 0 } as Record<PhotoCategory, number>;
+    for (const p of photos) c[p.category ?? "other"] += 1;
+    return c;
+  }, [photos]);
+  const shown =
+    filter === "all" ? photos : photos.filter((p) => (p.category ?? "other") === filter);
 
   const lightboxPhoto = photos.find((p) => p.id === lightboxId) ?? null;
 
@@ -240,31 +272,64 @@ export function PhotoGallery({
   }
 
   async function saveWithCaption(skip: boolean) {
-    if (!captionPrompt) return;
+    if (!captionPrompt || busy) return;
     setBusy(true);
+    const caption = skip ? "" : pendingCaption.trim();
+    const files = captionPrompt.files;
+    let saved = 0;
     try {
-      const caption = skip ? "" : pendingCaption.trim();
-      for (const file of captionPrompt.files) {
-        await addPhoto(jobId, file, caption);
+      for (const file of files) {
+        await addPhoto(jobId, file, caption, category);
+        saved += 1;
       }
-      refreshSitefold();
       setCaptionPrompt(null);
       setPendingCaption("");
+    } catch (e) {
+      const reason =
+        e instanceof Error && e.name === "QuotaExceededError"
+          ? "This device is out of storage for Job Snap. Make a full backup, then free up space."
+          : e instanceof Error
+            ? e.message
+            : "Unknown error.";
+      // Keep only the unsaved files in the prompt so Save retries just those.
+      setCaptionPrompt({ files: files.slice(saved) });
+      alert(
+        `Saved ${saved} of ${files.length} photo${files.length === 1 ? "" : "s"}. ${reason}`,
+      );
     } finally {
+      refreshSitefold();
       setBusy(false);
     }
   }
 
   async function onDelete(id: string) {
-    if (!confirm("Delete this photo?")) return;
-    await deletePhoto(id);
-    if (lightboxId === id) setLightboxId(null);
-    refreshSitefold();
+    if (!confirm("Delete this photo? This can't be undone.")) return;
+    try {
+      await deletePhoto(id);
+      if (lightboxId === id) setLightboxId(null);
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not delete photo");
+    }
+  }
+
+  async function onChangeCategory(id: string, next: PhotoCategory) {
+    try {
+      await updatePhoto(id, { category: next });
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not change category");
+    }
   }
 
   async function onSaveCaption(id: string, caption: string) {
-    await updatePhotoCaption(id, caption);
-    refreshSitefold();
+    try {
+      await updatePhotoCaption(id, caption);
+      refreshSitefold();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not save caption");
+      throw e;
+    }
   }
 
   return (
@@ -324,8 +389,36 @@ export function PhotoGallery({
           Snap a site photo — it stays with this job
         </button>
       ) : (
+        <>
+        <div
+          role="group"
+          aria-label="Filter photos"
+          className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1"
+        >
+          {(["all", ...PHOTO_CATEGORIES] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={filter === c}
+              onClick={() => setFilter(c)}
+              className={cn(
+                "h-9 shrink-0 rounded-full px-3.5 text-sm font-medium ring-1 transition",
+                filter === c
+                  ? "bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] ring-transparent"
+                  : "bg-white/70 ring-[oklch(0.35_0.03_155_/0.15)]",
+              )}
+            >
+              {c === "all" ? `All ${photos.length}` : `${PHOTO_CATEGORY_LABEL[c]} ${counts[c]}`}
+            </button>
+          ))}
+        </div>
+        {shown.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No {filter === "all" ? "" : PHOTO_CATEGORY_LABEL[filter as PhotoCategory].toLowerCase()} photos yet.
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
-          {photos.map((photo) => (
+          {shown.map((photo) => (
             <PhotoThumb
               key={photo.id}
               photo={photo}
@@ -333,6 +426,7 @@ export function PhotoGallery({
             />
           ))}
         </div>
+        </>
       )}
 
       <Dialog
@@ -347,20 +441,41 @@ export function PhotoGallery({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>
-              Caption
+              Save photo
               {captionPrompt && captionPrompt.files.length > 1
                 ? ` (${captionPrompt.files.length} photos)`
                 : ""}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-1.5">
-            <Label htmlFor="new-photo-caption">Optional label</Label>
+            <p className="text-sm font-medium">Category</p>
+            <div role="radiogroup" aria-label="Photo category" className="grid grid-cols-4 gap-1.5">
+              {PHOTO_CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  role="radio"
+                  aria-checked={category === c}
+                  onClick={() => setCategory(c)}
+                  className={cn(
+                    "h-11 rounded-lg text-sm font-medium ring-1 transition",
+                    category === c
+                      ? "bg-[oklch(0.32_0.05_155)] text-[oklch(0.97_0.02_95)] ring-transparent"
+                      : "bg-white ring-[oklch(0.35_0.03_155_/0.2)]",
+                  )}
+                >
+                  {PHOTO_CATEGORY_LABEL[c]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-photo-caption">Optional caption</Label>
             <Input
               id="new-photo-caption"
               value={pendingCaption}
               onChange={(e) => setPendingCaption(e.target.value)}
-              placeholder="Before drywall, serial #, front yard…"
-              autoFocus
+              placeholder="Kitchen wall, serial #, front yard…"
               onKeyDown={(e) => {
                 if (e.key === "Enter") void saveWithCaption(false);
               }}
@@ -394,6 +509,7 @@ export function PhotoGallery({
         <PhotoLightbox
           key={`${lightboxPhoto.id}:${lightboxPhoto.caption}`}
           photo={lightboxPhoto}
+          onChangeCategory={(c) => onChangeCategory(lightboxPhoto.id, c)}
           onClose={() => setLightboxId(null)}
           onDelete={() => void onDelete(lightboxPhoto.id)}
           onSaveCaption={(caption) => onSaveCaption(lightboxPhoto.id, caption)}

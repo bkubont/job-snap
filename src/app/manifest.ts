@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Job Snap",
     short_name: "Job Snap",
     description:
-      "Turn phone contacts into job folders. Punch in and out, take photos, write daily notes, and export your time clock.",
+      "Customers, jobs, time clock, photos and notes for field work — export timecards and back up everything.",
     start_url: "/",
     display: "standalone",
     background_color: "#f5f2e8",

@@ -16,6 +16,8 @@ export default defineConfig({
     baseURL,
     ...devices["Pixel 7"],
     trace: "on-first-retry",
+    // Fail a stuck click/fill quickly instead of waiting for the test timeout.
+    actionTimeout: 20_000,
   },
   webServer: {
     command: "npm run build && npm run start",

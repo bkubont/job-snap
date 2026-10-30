@@ -8,7 +8,8 @@ import {
   ArrowRightLeft,
   Briefcase,
   Check,
-  ChevronRight,
+  Mail,
+  Phone,
   MapPin,
   Pencil,
   Play,
@@ -22,25 +23,18 @@ import {
   refreshSitefold,
 } from "@/hooks/use-sitefold";
 import {
-  createJob,
   deleteContact,
   updateContact,
-  updateJob,
   switchPunchToJob,
 } from "@/lib/db";
+import { LoadError } from "@/components/load-error";
+import { StatusPicker } from "@/components/job-status";
+import { AddJobDialog } from "@/components/job-dialogs";
 import { mapsDirectionsUrl } from "@/lib/export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { formatDay } from "@/lib/time";
 
 type EditForm = {
@@ -91,12 +85,10 @@ export default function ContactPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { contact, jobs } = useContact(id);
+  const { contact, jobs, error, retry } = useContact(id);
   const { active } = useActivePunch();
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -115,7 +107,11 @@ export default function ContactPage({
   }, [contact, editing]);
 
   if (contact === undefined) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return error ? (
+      <LoadError error={error} onRetry={retry} what="this contact" />
+    ) : (
+      <p className="text-sm text-muted-foreground">Loading…</p>
+    );
   }
   if (contact === null) {
     return (
@@ -128,61 +124,27 @@ export default function ContactPage({
     );
   }
 
-  async function createAndPunch(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) return;
-    setCreating(true);
-    try {
-      const job = await createJob(id, title);
-      setTitle("");
-      setOpen(false);
-      await switchPunchToJob(job.id);
-      refreshSitefold();
-      router.push(`/jobs/${job.id}`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not create job");
-      refreshSitefold();
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  async function onAddJobOnly(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) return;
-    setCreating(true);
-    try {
-      const job = await createJob(id, title);
-      setTitle("");
-      setOpen(false);
-      refreshSitefold();
-      router.push(`/jobs/${job.id}`);
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function onDelete() {
     if (
       !confirm(
-        `Delete ${contact!.name} and all jobs, punches, and photos inside?`,
+        `Delete ${contact!.name} and all ${jobs.length} job${
+          jobs.length === 1 ? "" : "s"
+        } inside, with every punch and photo? This can't be undone.`,
       )
     ) {
       return;
     }
-    await deleteContact(id);
-    refreshSitefold();
-    router.push("/");
-  }
-
-  async function toggleStatus(jobId: string, status: "open" | "closed") {
-    const job = jobs.find((j) => j.id === jobId);
-    if (!job) return;
-    await updateJob({
-      ...job,
-      status: status === "open" ? "closed" : "open",
-    });
-    refreshSitefold();
+    try {
+      await deleteContact(id);
+      refreshSitefold();
+      router.push("/");
+    } catch (e) {
+      alert(
+        e instanceof Error
+          ? `Nothing was deleted: ${e.message}`
+          : "Nothing was deleted.",
+      );
+    }
   }
 
   async function onQuickPunch(jobId: string) {
@@ -191,7 +153,7 @@ export default function ContactPage({
       await switchPunchToJob(jobId);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not punch in");
+      alert(e instanceof Error ? e.message : "Could not clock in");
     } finally {
       setBusyJobId(null);
     }
@@ -233,6 +195,7 @@ export default function ContactPage({
     }
   }
 
+  const phoneHref = contact.phone ? `tel:${contact.phone.replace(/[^\d+]/g, "")}` : null;
   const headerSubtitle =
     [contact.phone, contact.email, contact.address]
       .filter(Boolean)
@@ -274,6 +237,27 @@ export default function ContactPage({
           <Trash2 className="h-4 w-4 text-destructive" />
         </Button>
       </div>
+
+      {!editing && (phoneHref || contact.email) ? (
+        <div className="flex gap-2">
+          {phoneHref ? (
+            <Button asChild variant="outline" className="h-11 flex-1">
+              <a href={phoneHref}>
+                <Phone className="h-4 w-4" />
+                Call
+              </a>
+            </Button>
+          ) : null}
+          {contact.email ? (
+            <Button asChild variant="outline" className="h-11 flex-1">
+              <a href={`mailto:${contact.email}`}>
+                <Mail className="h-4 w-4" />
+                Email
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {directionsUrl && !editing ? (
         <a
@@ -410,62 +394,30 @@ export default function ContactPage({
       ) : null}
 
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-heading text-lg font-semibold">Jobs</h2>
-        <Dialog
-          open={open}
-          onOpenChange={(v) => {
-            setOpen(v);
-            if (!v) setTitle("");
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4" />
-              New job &amp; punch in
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>New job in {contact.name}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={createAndPunch} className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="title">Job title</Label>
-                <Input
-                  id="title"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Kitchen remodel, Service call…"
-                  autoFocus
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Notes live on the job page after create.
-              </p>
-              <Button type="submit" className="w-full" disabled={creating}>
-                <Play className="h-4 w-4" />
-                {creating ? "Starting…" : "Create & punch in"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                disabled={creating || !title.trim()}
-                onClick={onAddJobOnly}
-              >
-                Create without punching in
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <h2 className="font-heading text-lg font-semibold">
+          Jobs{" "}
+          <span className="text-sm font-normal text-muted-foreground">
+            {jobs.length ? `(${jobs.length})` : ""}
+          </span>
+        </h2>
+        <Button size="sm" onClick={() => setOpen(true)}>
+          <Plus className="h-4 w-4" />
+          New job
+        </Button>
       </div>
+      <AddJobDialog
+        open={open}
+        onOpenChange={setOpen}
+        contacts={[contact]}
+        contactId={contact.id}
+        onCreated={(job) => router.push(`/jobs/${job.id}`)}
+      />
 
       {jobs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-[oklch(0.45_0.04_155_/0.35)] px-5 py-10 text-center">
           <Briefcase className="mx-auto h-7 w-7 text-[oklch(0.45_0.05_155)]" />
           <p className="mt-2 text-sm text-muted-foreground">
-            No jobs yet. Add one to punch in and take photos.
+            No jobs yet. Each job gets its own time, photos and notes.
           </p>
         </div>
       ) : (
@@ -475,58 +427,41 @@ export default function ContactPage({
             const switchMode = !!active && !isHere;
             return (
               <li key={job.id}>
-                <div className="flex items-stretch gap-1.5 rounded-2xl bg-white/70 p-1.5 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
+                <div className="relative flex items-center gap-2 rounded-2xl bg-white/70 p-1.5 pl-3.5 shadow-sm ring-1 ring-[oklch(0.35_0.03_155_/0.08)]">
                   <Link
                     href={`/jobs/${job.id}`}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2.5 py-2.5 transition hover:bg-[oklch(0.96_0.01_95)]"
+                    className="min-w-0 flex-1 py-2 after:absolute after:inset-0 after:rounded-2xl"
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate font-medium">{job.title}</p>
-                        <Badge
-                          variant={
-                            job.status === "open" ? "default" : "secondary"
-                          }
-                          className="shrink-0 text-[10px]"
-                        >
-                          {job.status}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Started {formatDay(job.createdAt)}
-                        {isHere ? " · on clock" : ""}
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <p className="truncate font-medium">{job.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {isHere
+                        ? "On the clock now"
+                        : job.scheduledDate
+                          ? `Scheduled ${formatDay(job.scheduledDate)}`
+                          : `Created ${formatDay(job.createdAt)}`}
+                    </p>
                   </Link>
-                  {job.status === "open" && !isHere ? (
+                  <StatusPicker
+                    jobId={job.id}
+                    status={job.status}
+                    className="relative z-10"
+                  />
+                  {!isHere ? (
                     <Button
                       size="sm"
                       variant="secondary"
                       disabled={busyJobId === job.id}
                       onClick={() => onQuickPunch(job.id)}
-                      className="shrink-0 self-center"
+                      className="relative z-10 h-10 shrink-0"
+                      aria-label={`${switchMode ? "Switch to" : "Clock in to"} ${job.title}`}
                     >
                       {switchMode ? (
-                        <>
-                          <ArrowRightLeft className="h-3.5 w-3.5" />
-                          Switch
-                        </>
+                        <ArrowRightLeft className="h-4 w-4" />
                       ) : (
-                        <>
-                          <Play className="h-3.5 w-3.5" />
-                          In
-                        </>
+                        <Play className="h-4 w-4" />
                       )}
                     </Button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() => toggleStatus(job.id, job.status)}
-                    className="shrink-0 self-center px-2 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                  >
-                    {job.status === "open" ? "Close" : "Reopen"}
-                  </button>
                 </div>
               </li>
             );

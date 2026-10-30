@@ -11,12 +11,14 @@ import {
   Upload,
 } from "lucide-react";
 import {
+  getStorageStatus,
   listAllJobs,
   listAllPhotos,
   listAllPunches,
   listContacts,
   listDayNotes,
 } from "@/lib/db";
+import { LoadError } from "@/components/load-error";
 import type { Contact, DayNote, Job, Photo, Punch } from "@/lib/types";
 import {
   buildExportPackageZip,
@@ -37,6 +39,8 @@ import {
 } from "@/lib/backup";
 import { formatDay, hoursFromMinutes, todayKey } from "@/lib/time";
 import { buildInvoiceData, downloadInvoicePdf } from "@/lib/invoice";
+import { describeRounding, useSettings } from "@/lib/settings";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -81,6 +85,7 @@ function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
 }
 
 export default function ExportPage() {
+  const settings = useSettings();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [contactId, setContactId] = useState("");
@@ -100,6 +105,12 @@ export default function ExportPage() {
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<Error | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [storage, setStorage] = useState<Awaited<
+    ReturnType<typeof getStorageStatus>
+  > | null>(null);
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -113,26 +124,38 @@ export default function ExportPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [p, j, c, n, ph] = await Promise.all([
-        listAllPunches(),
-        listAllJobs(),
-        listContacts(),
-        listDayNotes(),
-        listAllPhotos(),
-      ]);
-      if (!cancelled) {
-        setPunches(p);
-        setJobs(j);
-        setContacts(c);
-        setDayNotes(n);
-        setPhotos(ph);
-        setLoading(false);
+      setLoadError(null);
+      try {
+        const [p, j, c, n, ph] = await Promise.all([
+          listAllPunches(),
+          listAllJobs(),
+          listContacts(),
+          listDayNotes(),
+          listAllPhotos(),
+        ]);
+        if (!cancelled) {
+          setPunches(p);
+          setJobs(j);
+          setContacts(c);
+          setDayNotes(n);
+          setPhotos(ph);
+          setLoading(false);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(
+            e instanceof Error ? e : new Error("Could not read stored data."),
+          );
+        }
       }
     })();
+    getStorageStatus().then((status) => {
+      if (!cancelled) setStorage(status);
+    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   const jobsForFilter = useMemo(() => {
     const list = contactId
@@ -254,6 +277,10 @@ export default function ExportPage() {
         photos: photoItems,
       });
       downloadBlob(`job-snap-export-${from}-to-${to}${suffix}.zip`, zip);
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? `ZIP not created: ${e.message}` : "ZIP not created.",
+      );
     } finally {
       setPackaging(false);
     }
@@ -272,8 +299,15 @@ export default function ExportPage() {
         rows,
         from,
         to,
+        rounding: settings,
       });
       await downloadInvoicePdf(data);
+    } catch (e) {
+      setActionError(
+        e instanceof Error
+          ? `Invoice not created: ${e.message}`
+          : "Invoice not created.",
+      );
     } finally {
       setInvoicing(false);
     }
@@ -287,7 +321,7 @@ export default function ExportPage() {
       const counts = await downloadFullBackup();
       setLastBackupAt(getLastBackupAt());
       setBackupMessage(
-        `Backup saved · ${counts.contacts} contacts, ${counts.jobs} jobs, ${counts.punches} punches, ${counts.photos} photos.`,
+        `Backup download started · ${counts.contacts} contacts, ${counts.jobs} jobs, ${counts.punches} punches, ${counts.dayNotes} day notes, ${counts.photos} photos. Check that the file was saved (on iPhone: Files → Downloads).`,
       );
     } catch (err) {
       setBackupError(
@@ -351,9 +385,35 @@ export default function ExportPage() {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Download or print your time clock with daily notes, job notes, and
-          site photos. Filter by client for invoice PDF and ZIP packages.
+          site photos. Filter by client for invoice PDF and ZIP packages. To
+          save <em>everything</em> for safekeeping, use Full backup below.
         </p>
       </div>
+
+      {loadError ? (
+        <div className="print:hidden">
+          <LoadError
+            error={loadError}
+            onRetry={() => setLoadAttempt((n) => n + 1)}
+            what="your records for export"
+          />
+        </div>
+      ) : null}
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded-xl bg-destructive/5 px-3 py-2 text-sm text-destructive print:hidden"
+        >
+          {actionError}{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => setActionError(null)}
+          >
+            Dismiss
+          </button>
+        </p>
+      ) : null}
 
       <section className="space-y-3 rounded-2xl bg-white/70 p-4 ring-1 ring-[oklch(0.35_0.03_155_/0.08)] print:hidden">
         <div className="grid grid-cols-2 gap-3">
@@ -457,17 +517,21 @@ export default function ExportPage() {
             {selectedContact.hourlyRate != null
               ? ` at $${selectedContact.hourlyRate}/hr`
               : " (hours only — set a rate on the contact to bill)"}
-            . Closed punches only.
+            . Closed entries only. {describeRounding(settings)} —{" "}
+            <Link href="/settings" className="underline underline-offset-2">
+              change
+            </Link>
+            .
           </p>
         ) : null}
         {photoItems.length > 0 ? (
           <p className="text-xs text-muted-foreground">
             ZIP includes the CSV plus {photoItems.length} photo
-            {photoItems.length === 1 ? "" : "s"} named by job and date.
+            {photoItems.length === 1 ? "" : "s"} in customer / job folders.
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            ZIP packages the CSV with any photos on jobs punched in this range.
+            ZIP packages the CSV with photos from jobs with time in this range.
           </p>
         )}
       </section>
@@ -512,7 +576,7 @@ export default function ExportPage() {
         </div>
         {lastBackupAt ? (
           <p className="text-xs text-muted-foreground">
-            Last backup on this browser:{" "}
+            Last backup download on this browser:{" "}
             <span className="tabular-nums">
               {format(new Date(lastBackupAt), "MMM d, yyyy · h:mm a")}
             </span>
@@ -526,8 +590,11 @@ export default function ExportPage() {
           <p className="text-xs text-[oklch(0.35_0.06_155)]">{backupMessage}</p>
         ) : null}
         {backupError ? (
-          <p className="text-xs text-destructive">{backupError}</p>
+          <p role="alert" className="text-xs text-destructive">
+            {backupError}
+          </p>
         ) : null}
+        {storage ? <StorageLine storage={storage} /> : null}
       </section>
 
       <Dialog
@@ -556,6 +623,27 @@ export default function ExportPage() {
               .
             </DialogDescription>
           </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Not sure? Save what&apos;s here first — it can be restored later.
+          </p>
+          <Button
+            variant="secondary"
+            disabled={restoring || backingUp}
+            onClick={onFullBackup}
+          >
+            <HardDriveDownload className="h-4 w-4" />
+            {backingUp ? "Building…" : "Back up current data first"}
+          </Button>
+          {backupMessage ? (
+            <p className="text-xs text-[oklch(0.35_0.06_155)]">
+              {backupMessage}
+            </p>
+          ) : null}
+          {backupError ? (
+            <p role="alert" className="text-xs text-destructive">
+              {backupError}
+            </p>
+          ) : null}
           <DialogFooter>
             <Button
               variant="outline"
@@ -632,7 +720,7 @@ export default function ExportPage() {
             role="status"
             className="rounded-xl bg-[oklch(0.94_0.04_85)] px-3 py-2 text-sm text-[oklch(0.35_0.05_75)] ring-1 ring-[oklch(0.75_0.08_75_/0.35)]"
           >
-            {openCount} open punch{openCount === 1 ? "" : "es"} listed as Still
+            {openCount} running entr{openCount === 1 ? "y" : "ies"} listed as Still
             open — excluded from billed hours.
           </p>
         ) : null}
@@ -704,7 +792,7 @@ export default function ExportPage() {
                 <header className="mb-3 border-b border-[oklch(0.35_0.03_155_/0.1)] pb-2">
                   <h3 className="font-heading font-semibold">Job notes</h3>
                   <p className="text-xs text-muted-foreground">
-                    Notes on jobs punched in this range
+                    Notes on jobs with time in this range
                   </p>
                 </header>
                 <ul className="space-y-3">
@@ -765,4 +853,34 @@ export default function ExportPage() {
       </section>
     </div>
   );
+}
+
+function formatBytes(n: number) {
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function StorageLine({
+  storage,
+}: {
+  storage: { persisted: boolean | null; usage: number | null; quota: number | null };
+}) {
+  const parts: string[] = [];
+  if (storage.usage != null) {
+    parts.push(
+      `Using ${formatBytes(storage.usage)}${
+        storage.quota ? ` of ${formatBytes(storage.quota)} available` : ""
+      } on this device`,
+    );
+  }
+  if (storage.persisted === true) {
+    parts.push("protected from automatic clearing");
+  } else if (storage.persisted === false) {
+    parts.push(
+      "the browser may clear it if unused — add Job Snap to your Home Screen and back up regularly",
+    );
+  }
+  if (!parts.length) return null;
+  return <p className="text-xs text-muted-foreground">Storage: {parts.join(" · ")}.</p>;
 }

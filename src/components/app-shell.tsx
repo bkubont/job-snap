@@ -1,23 +1,37 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FolderOpen, NotebookPen, Download, Clock } from "lucide-react";
+import {
+  Briefcase,
+  Clock,
+  Home,
+  Menu,
+  Timer,
+  Users,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ActivePunchBar } from "@/components/active-punch-bar";
 import { BackupNudge } from "@/components/backup-nudge";
 import { InstallPrompt } from "@/components/install-prompt";
 import { PwaRegister } from "@/components/pwa-register";
 
+/** `match` lists the path prefixes that light up each tab. */
 const nav = [
-  { href: "/", label: "Contacts", icon: FolderOpen },
-  { href: "/notes", label: "Notes", icon: NotebookPen },
-  { href: "/export", label: "Export", icon: Download },
+  { href: "/", label: "Home", icon: Home, match: [] as string[] },
+  { href: "/contacts", label: "Contacts", icon: Users, match: ["/contacts"] },
+  { href: "/jobs", label: "Jobs", icon: Briefcase, match: ["/jobs"] },
+  { href: "/time", label: "Time", icon: Timer, match: ["/time"] },
+  {
+    href: "/more",
+    label: "More",
+    icon: Menu,
+    match: ["/more", "/notes", "/export", "/settings"],
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-
   return (
     <div className="relative flex min-h-full flex-col">
       <PwaRegister />
@@ -49,46 +63,73 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </Link>
         </div>
-        <ActivePunchBar />
+        {/* usePathname() needs a boundary; fallback shows the full bar. */}
+        <Suspense fallback={<ActivePunchBar />}>
+          <RouteAwarePunchBar />
+        </Suspense>
         <BackupNudge />
         <InstallPrompt />
       </header>
 
       <main className="mx-auto w-full max-w-lg flex-1 px-4 pb-28 pt-5">
-        {children}
+        {/* Boundary around page content only, so the header and nav are
+            always in the first HTML even when a large page streams in. */}
+        <Suspense
+          fallback={
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Loading…
+            </p>
+          }
+        >
+          {children}
+        </Suspense>
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[oklch(0.35_0.03_155_/0.15)] bg-[oklch(0.98_0.008_95_/0.92)] backdrop-blur-md">
-        <div className="mx-auto grid max-w-lg grid-cols-3 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
-          {nav.map(({ href, label, icon: Icon }) => {
-            const active =
-              href === "/"
-                ? pathname === "/" || pathname.startsWith("/contacts") || pathname.startsWith("/jobs")
-                : pathname.startsWith(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "flex flex-col items-center gap-1 rounded-xl px-2 py-2 text-xs font-medium transition-colors",
-                  active
-                    ? "text-[oklch(0.32_0.05_155)]"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon
-                  className={cn(
-                    "h-5 w-5 transition-transform",
-                    active && "scale-110",
-                  )}
-                  strokeWidth={active ? 2.4 : 2}
-                />
-                {label}
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
+      {/* usePathname() needs a boundary on dynamic routes; the fallback is
+          the same nav without the active highlight. */}
+      <Suspense fallback={<BottomNav pathname={null} />}>
+        <CurrentBottomNav />
+      </Suspense>
     </div>
+  );
+}
+
+function RouteAwarePunchBar() {
+  return <ActivePunchBar compact={usePathname() === "/"} />;
+}
+
+function CurrentBottomNav() {
+  return <BottomNav pathname={usePathname()} />;
+}
+
+function BottomNav({ pathname }: { pathname: string | null }) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[oklch(0.35_0.03_155_/0.15)] bg-[oklch(0.98_0.008_95_/0.92)] backdrop-blur-md">
+      <div className="mx-auto grid max-w-lg grid-cols-5 gap-1 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1.5">
+        {nav.map(({ href, label, icon: Icon, match }) => {
+          const active =
+            pathname !== null &&
+            (href === "/"
+              ? pathname === "/"
+              : match.some((m) => pathname.startsWith(m)));
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-[11px] font-medium transition-colors",
+                active
+                  ? "bg-[oklch(0.32_0.05_155_/0.1)] font-semibold text-[oklch(0.3_0.05_155)]"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="h-5 w-5" strokeWidth={active ? 2.4 : 2} />
+              {label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
