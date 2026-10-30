@@ -55,6 +55,8 @@ type ContactForm = {
   email: string;
   address: string;
   notes: string;
+  /** Empty string = no rate; otherwise a numeric string for the input. */
+  hourlyRate: string;
 };
 
 const emptyForm: ContactForm = {
@@ -63,7 +65,16 @@ const emptyForm: ContactForm = {
   email: "",
   address: "",
   notes: "",
+  hourlyRate: "",
 };
+
+function parseHourlyRateInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
 
 function contactMatchesQuery(
   c: { name: string; phone: string; email: string; address: string },
@@ -218,7 +229,14 @@ export default function HomePage() {
   async function onCreateManual(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) return;
-    await createContact(form);
+    await createContact({
+      name: form.name,
+      phone: form.phone,
+      email: form.email,
+      address: form.address,
+      notes: form.notes,
+      hourlyRate: parseHourlyRateInput(form.hourlyRate),
+    });
     setForm(emptyForm);
     setShowMore(false);
     setOpen(false);
@@ -645,6 +663,21 @@ function ContactCreateForm({
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="hourlyRate">Hourly rate (optional)</Label>
+            <Input
+              id="hourlyRate"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              value={form.hourlyRate}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, hourlyRate: e.target.value }))
+              }
+              placeholder="e.g. 75"
+            />
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="notes">Notes</Label>
             <Input
               id="notes"
@@ -661,7 +694,7 @@ function ContactCreateForm({
           onClick={() => setShowMore(true)}
           className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
         >
-          More (email, notes)
+          More (email, rate, notes)
         </button>
       )}
       {!pickerOk ? (

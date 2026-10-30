@@ -201,12 +201,20 @@ test.describe("Job Snap smoke", () => {
       page.getByRole("heading", { name: "Kitchen remodel HVAC" }),
     ).toBeVisible();
 
-    // ── Export ZIP (filtered) ──
+    // ── Set hourly rate on Alpha ──
+    await openContact(page, "Alpha Client");
+    await page.getByRole("button", { name: "Edit contact" }).click();
+    await page.locator("#edit-hourlyRate").fill("85");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Contact saved")).toBeVisible();
+
+    // ── Export ZIP + invoice PDF (filtered) ──
     await page.goto("/export");
     await dismissCues(page);
     await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();
     await page.locator("#export-contact").selectOption({ label: "Alpha Client" });
     await expect(page.getByText("Phone: 555-0101")).toBeVisible();
+    await expect(page.getByText(/Rate: \$85\/hr/)).toBeVisible();
 
     const zipDownloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: /ZIP \+ photos/ }).click();
@@ -226,6 +234,18 @@ test.describe("Job Snap smoke", () => {
     expect(csv).toContain("555-0101");
     expect(csv).toContain("Before demo wall");
     expect(csv).not.toContain("Beta Client");
+
+    const pdfDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download invoice PDF" }).click();
+    const pdfDownload = await pdfDownloadPromise;
+    const pdfName = await pdfDownload.suggestedFilename();
+    expect(pdfName).toMatch(/\.pdf$/i);
+    expect(pdfName).toMatch(/invoice/i);
+    const pdfPath = path.join(tmp, pdfName);
+    await pdfDownload.saveAs(pdfPath);
+    expect(fs.statSync(pdfPath).size).toBeGreaterThan(200);
+    const pdfHead = fs.readFileSync(pdfPath).subarray(0, 5).toString("utf8");
+    expect(pdfHead).toBe("%PDF-");
 
     // ── Full backup round-trip ──
     const backupDownloadPromise = page.waitForEvent("download");

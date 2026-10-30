@@ -5,6 +5,8 @@ export type Contact = {
   email: string;
   address: string;
   notes: string;
+  /** Hourly billing rate; null/undefined = no rate (hours-only invoices). */
+  hourlyRate?: number | null;
   createdAt: string;
 };
 
