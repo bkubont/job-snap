@@ -9,10 +9,21 @@ import type {
   Contact,
   DayNote,
   Job,
+  JobEvent,
+  JobEventType,
+  JobStatus,
   Photo,
+  PhotoCategory,
   Punch,
   RecentJobInfo,
+  StoredJobStatus,
 } from "./types";
+import { JOB_STATUSES, PHOTO_CATEGORIES } from "./types";
+import { STATUS_LABEL, normalizeStatus } from "./status";
+import { formatDateTime } from "./time";
+
+/** A job as stored: may still carry the legacy "open"/"closed" status. */
+type StoredJob = Omit<Job, "status"> & { status: StoredJobStatus };
 
 interface SitefoldDB extends DBSchema {
   contacts: {
@@ -22,7 +33,7 @@ interface SitefoldDB extends DBSchema {
   };
   jobs: {
     key: string;
-    value: Job;
+    value: StoredJob;
     indexes: { "by-contact": string };
   };
   punches: {
@@ -207,54 +218,149 @@ export async function deleteContact(contactId: string) {
 }
 
 export async function listJobsForContact(contactId: string): Promise<Job[]> {
-  const jobs = await (await getDb()).getAllFromIndex(
-    "jobs",
-    "by-contact",
-    contactId,
-  );
+  const jobs = (
+    await (await getDb()).getAllFromIndex("jobs", "by-contact", contactId)
+  ).map((j) => normalizeJob(j));
   return jobs.sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
 }
 
+/**
+ * Read a stored job with defaults for fields added later. Legacy statuses are
+ * translated for display only; the stored record is not rewritten.
+ */
+export function normalizeJob(raw: StoredJob): Job;
+export function normalizeJob(raw: StoredJob | undefined): Job | undefined;
+export function normalizeJob(raw: StoredJob | undefined): Job | undefined {
+  if (!raw) return undefined;
+  return {
+    ...raw,
+    status: normalizeStatus(raw.status),
+    notes: raw.notes ?? "",
+    address: raw.address ?? "",
+    scheduledDate: raw.scheduledDate || null,
+    description: raw.description ?? "",
+    instructions: raw.instructions ?? "",
+    history: Array.isArray(raw.history) ? raw.history : [],
+  };
+}
+
 export async function listAllJobs(): Promise<Job[]> {
-  return (await getDb()).getAll("jobs");
+  return (await (await getDb()).getAll("jobs")).map((j) => normalizeJob(j));
 }
 
 export async function getJob(jobId: string) {
-  return (await getDb()).get("jobs", jobId);
+  return normalizeJob(await (await getDb()).get("jobs", jobId));
+}
+
+function makeEvent(type: JobEventType, text: string, at = now()): JobEvent {
+  return { id: id(), at, type, text };
+}
+
+function withEvents(job: StoredJob, events: JobEvent[]): StoredJob {
+  if (!events.length) return job;
+  return { ...job, history: [...(job.history ?? []), ...events] };
 }
 
 export async function createJob(
   contactId: string,
   title: string,
-  notes = "",
+  details: {
+    notes?: string;
+    status?: JobStatus;
+    address?: string;
+    scheduledDate?: string | null;
+    description?: string;
+  } = {},
 ) {
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Job title is required.");
+  const status = details.status ?? (details.scheduledDate ? "scheduled" : "in_progress");
   const job: Job = {
     id: id(),
     contactId,
-    title: title.trim(),
-    status: "open",
-    notes: notes.trim(),
+    title: trimmed,
+    status,
+    notes: (details.notes ?? "").trim(),
     createdAt: now(),
+    address: (details.address ?? "").trim(),
+    scheduledDate: details.scheduledDate || null,
+    description: (details.description ?? "").trim(),
+    instructions: "",
+    history: [],
   };
   await (await getDb()).put("jobs", job);
   return job;
 }
 
-export async function updateJob(job: Job) {
-  await (await getDb()).put("jobs", job);
-  return job;
+export type JobPatch = Partial<
+  Pick<
+    Job,
+    | "title"
+    | "notes"
+    | "status"
+    | "address"
+    | "scheduledDate"
+    | "description"
+    | "instructions"
+  >
+>;
+
+const DETAIL_LABELS: Record<string, string> = {
+  address: "job address",
+  scheduledDate: "scheduled date",
+  description: "description",
+  instructions: "important instructions",
+};
+
+/** History entries describing what a patch changes (notes are not logged). */
+function eventsForPatch(current: Job, patch: JobPatch, at: string, reason?: string) {
+  const events: JobEvent[] = [];
+  if (patch.status && patch.status !== current.status) {
+    events.push(
+      makeEvent(
+        "status",
+        `Status: ${STATUS_LABEL[current.status]} → ${STATUS_LABEL[patch.status]}${
+          reason ? ` (${reason})` : ""
+        }`,
+        at,
+      ),
+    );
+  }
+  if (patch.title !== undefined && patch.title.trim() !== current.title) {
+    events.push(
+      makeEvent("title", `Renamed from "${current.title}" to "${patch.title.trim()}"`, at),
+    );
+  }
+  const changed = Object.keys(DETAIL_LABELS).filter((key) => {
+    const k = key as keyof JobPatch;
+    if (patch[k] === undefined) return false;
+    return (patch[k] || "") !== (current[k as keyof Job] || "");
+  });
+  if (changed.length) {
+    events.push(
+      makeEvent(
+        "details",
+        `Updated ${changed.map((k) => DETAIL_LABELS[k]).join(", ")}`,
+        at,
+      ),
+    );
+  }
+  return events;
 }
 
 /**
  * Patch selected fields on the latest stored copy of a job (read + write in one
  * transaction), so an autosaving note can't overwrite a title or status that
- * changed since the screen loaded.
+ * changed since the screen loaded. Status, title and detail changes are added
+ * to the job's history. Fields not in the patch — including a legacy stored
+ * status — are left exactly as stored.
  */
 export async function updateJobFields(
   jobId: string,
-  patch: Partial<Pick<Job, "title" | "notes" | "status">>,
+  patch: JobPatch,
+  options: { reason?: string } = {},
 ) {
   const db = await getDb();
   const tx = db.transaction("jobs", "readwrite");
@@ -264,10 +370,57 @@ export async function updateJobFields(
     await tx.done.catch(() => {});
     throw new Error("This job no longer exists.");
   }
-  const next: Job = { ...current, ...patch };
+  const clean: JobPatch = { ...patch };
+  if (clean.title !== undefined) {
+    clean.title = clean.title.trim();
+    if (!clean.title) {
+      tx.abort();
+      await tx.done.catch(() => {});
+      throw new Error("Job title is required.");
+    }
+  }
+  for (const key of ["address", "description", "instructions"] as const) {
+    if (clean[key] !== undefined) clean[key] = (clean[key] ?? "").trim();
+  }
+  if (clean.scheduledDate !== undefined) clean.scheduledDate = clean.scheduledDate || null;
+  const events = eventsForPatch(normalizeJob(current), clean, now(), options.reason);
+  const next = withEvents({ ...current, ...clean }, events);
   await tx.store.put(next);
   await tx.done;
-  return next;
+  return normalizeJob(next);
+}
+
+/** Add a dated activity note to a job's history. */
+export async function addJobLogNote(jobId: string, text: string) {
+  const body = text.trim();
+  if (!body) throw new Error("Write something first.");
+  const db = await getDb();
+  const tx = db.transaction("jobs", "readwrite");
+  const current = await tx.store.get(jobId);
+  if (!current) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error("This job no longer exists.");
+  }
+  await tx.store.put(withEvents(current, [makeEvent("note", body)]));
+  await tx.done;
+}
+
+/** Delete one dated activity note (status/time history can't be deleted). */
+export async function deleteJobLogNote(jobId: string, eventId: string) {
+  const db = await getDb();
+  const tx = db.transaction("jobs", "readwrite");
+  const current = await tx.store.get(jobId);
+  if (!current) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error("This job no longer exists.");
+  }
+  const history = (current.history ?? []).filter(
+    (e) => !(e.id === eventId && e.type === "note"),
+  );
+  await tx.store.put({ ...current, history });
+  await tx.done;
 }
 
 type JobCascadeTx = IDBPTransaction<
@@ -354,6 +507,26 @@ async function describeOpenPunch(punch: Punch) {
     : "another job";
 }
 
+type PunchJobTx = IDBPTransaction<SitefoldDB, ("punches" | "jobs")[], "readwrite">;
+
+/** Clocking in means work is happening: move the job to In Progress (logged). */
+async function markInProgressInTx(tx: PunchJobTx, jobId: string, at: string) {
+  const jobs = tx.objectStore("jobs");
+  const current = await jobs.get(jobId);
+  if (!current) throw new Error("This job no longer exists.");
+  const status = normalizeStatus(current.status);
+  if (status === "in_progress") return;
+  await jobs.put(
+    withEvents({ ...current, status: "in_progress" }, [
+      makeEvent(
+        "status",
+        `Status: ${STATUS_LABEL[status]} → ${STATUS_LABEL.in_progress} (clocked in)`,
+        at,
+      ),
+    ]),
+  );
+}
+
 /**
  * Check-then-insert inside one readwrite transaction. IndexedDB serializes
  * overlapping readwrite transactions on the same store (also across tabs),
@@ -361,7 +534,7 @@ async function describeOpenPunch(punch: Punch) {
  */
 export async function punchIn(jobId: string) {
   const db = await getDb();
-  const tx = db.transaction("punches", "readwrite");
+  const tx = db.transaction(["punches", "jobs"], "readwrite");
   const store = tx.objectStore("punches");
   const all = await store.getAll();
   const open = all.find((p) => p.punchedOutAt === null);
@@ -369,15 +542,18 @@ export async function punchIn(jobId: string) {
     tx.abort();
     await tx.done.catch(() => {});
     throw new Error(
-      `Already punched in on ${await describeOpenPunch(open)}. Punch out first.`,
+      `Already clocked in on ${await describeOpenPunch(open)}. Clock out first.`,
     );
   }
+  const at = now();
   const punch: Punch = {
     id: id(),
     jobId,
-    punchedInAt: now(),
+    punchedInAt: at,
     punchedOutAt: null,
+    source: "clock",
   };
+  await markInProgressInTx(tx, jobId, at);
   await store.put(punch);
   await tx.done;
   return punch;
@@ -393,25 +569,144 @@ export async function punchOut(punchId?: string) {
     punch = open?.punch;
   }
   if (!punch || punch.punchedOutAt) {
-    throw new Error("No open punch to clock out.");
+    throw new Error("You're not clocked in.");
   }
   punch.punchedOutAt = now();
   await db.put("punches", punch);
   return punch;
 }
 
+function describeEntry(p: Pick<Punch, "punchedInAt" | "punchedOutAt">) {
+  return `${formatDateTime(p.punchedInAt)} – ${
+    p.punchedOutAt ? formatDateTime(p.punchedOutAt) : "open"
+  }`;
+}
+
+function overlaps(
+  aIn: string,
+  aOut: string | null,
+  bIn: string,
+  bOut: string | null,
+) {
+  const far = Number.POSITIVE_INFINITY;
+  const a0 = Date.parse(aIn);
+  const a1 = aOut ? Date.parse(aOut) : far;
+  const b0 = Date.parse(bIn);
+  const b1 = bOut ? Date.parse(bOut) : Date.now();
+  return a0 < b1 && b0 < a1;
+}
+
+/**
+ * Validate a time entry. Entries may not overlap another entry (on any job):
+ * one person can't be on two clocks, and overlaps would double-count hours.
+ */
+function validateEntry(
+  entry: Pick<Punch, "id" | "punchedInAt" | "punchedOutAt">,
+  all: Punch[],
+  jobTitles: Map<string, string>,
+) {
+  if (!entry.punchedInAt || Number.isNaN(Date.parse(entry.punchedInAt))) {
+    throw new Error("Start time is required.");
+  }
+  if (entry.punchedOutAt !== null) {
+    if (Number.isNaN(Date.parse(entry.punchedOutAt))) {
+      throw new Error("End time is invalid.");
+    }
+    if (Date.parse(entry.punchedOutAt) <= Date.parse(entry.punchedInAt)) {
+      throw new Error("End time must be after start time.");
+    }
+    if (Date.parse(entry.punchedOutAt) > Date.now() + 60_000) {
+      throw new Error("End time can't be in the future.");
+    }
+  } else {
+    const otherOpen = all.find(
+      (p) => p.id !== entry.id && p.punchedOutAt === null,
+    );
+    if (otherOpen) {
+      throw new Error(
+        "Another timer is already running. Clock out (or set an end time) there before leaving this entry running.",
+      );
+    }
+  }
+  const clash = all.find(
+    (p) =>
+      p.id !== entry.id &&
+      overlaps(entry.punchedInAt, entry.punchedOutAt, p.punchedInAt, p.punchedOutAt),
+  );
+  if (clash) {
+    const where = jobTitles.get(clash.jobId);
+    throw new Error(
+      `Overlaps another entry${where ? ` on "${where}"` : ""}: ${describeEntry(clash)}. Adjust the times so they don't overlap.`,
+    );
+  }
+}
+
+async function jobTitlesInTx(tx: PunchJobTx) {
+  const jobs = await tx.objectStore("jobs").getAll();
+  return new Map(jobs.map((j) => [j.id, j.title]));
+}
+
+async function logTimeEventInTx(tx: PunchJobTx, jobId: string, text: string) {
+  const jobs = tx.objectStore("jobs");
+  const current = await jobs.get(jobId);
+  if (current) await jobs.put(withEvents(current, [makeEvent("time", text)]));
+}
+
+/**
+ * Add a completed time entry after the fact (missed punch or work done away
+ * from the phone). Stored with source "manual" and logged in the job history.
+ */
+export async function addManualPunch(
+  jobId: string,
+  punchedInAt: string,
+  punchedOutAt: string,
+  note = "",
+) {
+  const db = await getDb();
+  const tx = db.transaction(["punches", "jobs"], "readwrite");
+  const store = tx.objectStore("punches");
+  const entry: Punch = {
+    id: id(),
+    jobId,
+    punchedInAt,
+    punchedOutAt,
+    source: "manual",
+    note: note.trim(),
+  };
+  try {
+    if (!(await tx.objectStore("jobs").get(jobId))) {
+      throw new Error("This job no longer exists.");
+    }
+    validateEntry(entry, await store.getAll(), await jobTitlesInTx(tx));
+  } catch (e) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw e;
+  }
+  await store.put(entry);
+  await logTimeEventInTx(
+    tx,
+    jobId,
+    `Manual entry added: ${describeEntry(entry)}${entry.note ? ` — ${entry.note}` : ""}`,
+  );
+  await tx.done;
+  return entry;
+}
+
 export async function updatePunch(
   punchId: string,
-  patch: { punchedInAt?: string; punchedOutAt?: string | null },
+  patch: { punchedInAt?: string; punchedOutAt?: string | null; note?: string },
 ) {
-  // One transaction: the "no other open punch" check and the write can't
-  // interleave with a punch-in from another tab. Throwing before put() leaves
-  // the transaction with nothing to commit.
+  // One transaction: validation (open-punch and overlap checks) and the write
+  // can't interleave with a punch-in from another tab.
   const db = await getDb();
-  const tx = db.transaction("punches", "readwrite");
-  const punch = await tx.store.get(punchId);
+  const tx = db.transaction(["punches", "jobs"], "readwrite");
+  const store = tx.objectStore("punches");
+  const punch = await store.get(punchId);
   if (!punch) {
-    throw new Error("Punch not found.");
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error("Time entry not found.");
   }
 
   const next: Punch = {
@@ -419,46 +714,46 @@ export async function updatePunch(
     punchedInAt: patch.punchedInAt ?? punch.punchedInAt,
     punchedOutAt:
       patch.punchedOutAt !== undefined ? patch.punchedOutAt : punch.punchedOutAt,
+    ...(patch.note !== undefined ? { note: patch.note.trim() } : {}),
   };
+  const timesChanged =
+    next.punchedInAt !== punch.punchedInAt ||
+    next.punchedOutAt !== punch.punchedOutAt;
 
-  if (!next.punchedInAt || Number.isNaN(Date.parse(next.punchedInAt))) {
-    throw new Error("Punch in time is required.");
+  if (timesChanged) {
+    try {
+      validateEntry(next, await store.getAll(), await jobTitlesInTx(tx));
+    } catch (e) {
+      tx.abort();
+      await tx.done.catch(() => {});
+      throw e;
+    }
   }
 
-  if (next.punchedOutAt !== null) {
-    if (Number.isNaN(Date.parse(next.punchedOutAt))) {
-      throw new Error("Punch out time is invalid.");
-    }
-    if (
-      new Date(next.punchedOutAt).getTime() <=
-      new Date(next.punchedInAt).getTime()
-    ) {
-      throw new Error("Punch out time must be after punch in time.");
-    }
-  } else {
-    const all = await tx.store.getAll();
-    const otherOpen = all.find(
-      (p) => p.id !== punchId && p.punchedOutAt === null,
+  await store.put(next);
+  if (timesChanged) {
+    await logTimeEventInTx(
+      tx,
+      punch.jobId,
+      `Time entry changed: ${describeEntry(punch)} → ${describeEntry(next)}`,
     );
-    if (otherOpen) {
-      throw new Error(
-        "Another punch is already open. Set an out time there (or punch out) before leaving this punch open.",
-      );
-    }
   }
-
-  await tx.store.put(next);
   await tx.done;
   return next;
 }
 
 export async function deletePunch(punchId: string) {
   const db = await getDb();
-  const punch = await db.get("punches", punchId);
+  const tx = db.transaction(["punches", "jobs"], "readwrite");
+  const punch = await tx.objectStore("punches").get(punchId);
   if (!punch) {
-    throw new Error("Punch not found.");
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error("Time entry not found.");
   }
-  await db.delete("punches", punchId);
+  await tx.objectStore("punches").delete(punchId);
+  await logTimeEventInTx(tx, punch.jobId, `Time entry deleted: ${describeEntry(punch)}`);
+  await tx.done;
 }
 
 /**
@@ -468,7 +763,7 @@ export async function deletePunch(punchId: string) {
  */
 export async function switchPunchToJob(jobId: string) {
   const db = await getDb();
-  const tx = db.transaction("punches", "readwrite");
+  const tx = db.transaction(["punches", "jobs"], "readwrite");
   const store = tx.objectStore("punches");
   const all = await store.getAll();
   const open = all.filter((p) => p.punchedOutAt === null);
@@ -486,19 +781,21 @@ export async function switchPunchToJob(jobId: string) {
     await tx.done;
     return alreadyHere;
   }
-  const punch: Punch = { id: id(), jobId, punchedInAt: at, punchedOutAt: null };
+  const punch: Punch = {
+    id: id(),
+    jobId,
+    punchedInAt: at,
+    punchedOutAt: null,
+    source: "clock",
+  };
+  await markInProgressInTx(tx, jobId, at);
   await store.put(punch);
   await tx.done;
   return punch;
 }
 
-/** Ensure job is open, then switch/punch in. */
+/** Reopen a finished job (logged as a status change) and punch in. */
 export async function reopenAndPunchIn(jobId: string) {
-  const job = await getJob(jobId);
-  if (!job) throw new Error("Job not found.");
-  if (job.status === "closed") {
-    await updateJob({ ...job, status: "open" });
-  }
   return switchPunchToJob(jobId);
 }
 
@@ -546,25 +843,57 @@ export async function listAllPhotos(): Promise<Photo[]> {
   );
 }
 
-export async function addPhoto(jobId: string, blob: Blob, caption = "") {
+function normalizeCategory(value: unknown): PhotoCategory {
+  return (PHOTO_CATEGORIES as readonly unknown[]).includes(value)
+    ? (value as PhotoCategory)
+    : "other";
+}
+
+/** Stores the original file as-is (no resizing or recompression). */
+export async function addPhoto(
+  jobId: string,
+  blob: Blob,
+  caption = "",
+  category: PhotoCategory = "other",
+) {
   const photo: Photo = {
     id: id(),
     jobId,
     blob,
     caption: caption.trim(),
     createdAt: now(),
+    category: normalizeCategory(category),
   };
   await (await getDb()).put("photos", photo);
   return photo;
 }
 
-export async function updatePhotoCaption(photoId: string, caption: string) {
+export async function updatePhoto(
+  photoId: string,
+  patch: { caption?: string; category?: PhotoCategory },
+) {
   const db = await getDb();
-  const photo = await db.get("photos", photoId);
-  if (!photo) throw new Error("Photo not found.");
-  const next: Photo = { ...photo, caption: caption.trim() };
-  await db.put("photos", next);
+  const tx = db.transaction("photos", "readwrite");
+  const photo = await tx.store.get(photoId);
+  if (!photo) {
+    tx.abort();
+    await tx.done.catch(() => {});
+    throw new Error("Photo not found.");
+  }
+  const next: Photo = {
+    ...photo,
+    ...(patch.caption !== undefined ? { caption: patch.caption.trim() } : {}),
+    ...(patch.category !== undefined
+      ? { category: normalizeCategory(patch.category) }
+      : {}),
+  };
+  await tx.store.put(next);
+  await tx.done;
   return next;
+}
+
+export async function updatePhotoCaption(photoId: string, caption: string) {
+  return updatePhoto(photoId, { caption });
 }
 
 export async function deletePhoto(photoId: string) {
@@ -595,12 +924,66 @@ export async function upsertDayNote(date: string, body: string) {
   return note;
 }
 
+/** `open` counts jobs that aren't finished (not Completed or Paid). */
 export async function countJobsForContact(contactId: string) {
   const jobs = await listJobsForContact(contactId);
   return {
     total: jobs.length,
-    open: jobs.filter((j) => j.status === "open").length,
+    open: jobs.filter((j) => j.status !== "completed" && j.status !== "paid")
+      .length,
   };
+}
+
+export type JobOverview = {
+  job: Job;
+  contact: Contact | null;
+  /** Exact closed-entry minutes plus the running entry so far. */
+  totalMinutes: number;
+  photoCount: number;
+  isActive: boolean;
+  /** Latest of: created, any entry start/end, any history event. */
+  lastActivityAt: string;
+};
+
+/** Every job with its customer, totals and last activity (for lists). */
+export async function listJobOverviews(): Promise<JobOverview[]> {
+  const db = await getDb();
+  const [jobs, contacts, punches] = await Promise.all([
+    listAllJobs(),
+    listContacts(),
+    db.getAll("punches"),
+  ]);
+  const contactMap = new Map(contacts.map((c) => [c.id, c]));
+  const photoCounts = await Promise.all(
+    jobs.map((j) => db.countFromIndex("photos", "by-job", j.id)),
+  );
+  const byJob = new Map<string, Punch[]>();
+  for (const p of punches) {
+    const list = byJob.get(p.jobId) ?? [];
+    list.push(p);
+    byJob.set(p.jobId, list);
+  }
+  const nowMs = Date.now();
+  return jobs.map((job, i) => {
+    const list = byJob.get(job.id) ?? [];
+    let totalMs = 0;
+    let last = Date.parse(job.createdAt);
+    for (const p of list) {
+      const start = Date.parse(p.punchedInAt);
+      const end = p.punchedOutAt ? Date.parse(p.punchedOutAt) : nowMs;
+      totalMs += Math.max(0, end - start);
+      last = Math.max(last, start, p.punchedOutAt ? end : start);
+    }
+    for (const e of job.history ?? []) last = Math.max(last, Date.parse(e.at));
+    return {
+      job,
+      contact: contactMap.get(job.contactId) ?? null,
+      totalMinutes: totalMs / 60000,
+      photoCount: photoCounts[i] ?? 0,
+      isActive: list.some((p) => p.punchedOutAt === null),
+      lastActivityAt: new Date(last).toISOString(),
+    };
+  });
 }
 
 export async function photoCountForJob(jobId: string) {
@@ -625,7 +1008,7 @@ export async function readAllData() {
  */
 export async function replaceAllData(data: {
   contacts: Contact[];
-  jobs: Job[];
+  jobs: (Job | StoredJob)[];
   punches: Punch[];
   dayNotes: DayNote[];
   photos: Photo[];
@@ -647,12 +1030,14 @@ export async function replaceAllData(data: {
   for (const contact of data.contacts) {
     await tx.objectStore("contacts").put(normalizeContact(contact)!);
   }
-  for (const job of data.jobs) {
+  const knownStatuses: string[] = ["open", "closed", ...JOB_STATUSES];
+  for (const job of data.jobs as StoredJob[]) {
     await tx.objectStore("jobs").put({
       ...job,
       title: job.title.trim(),
       notes: job.notes ?? "",
-      status: job.status === "closed" ? "closed" : "open",
+      // Keep the stored value (legacy or new); only repair unknown values.
+      status: knownStatuses.includes(job.status) ? job.status : "in_progress",
     });
   }
   for (const punch of data.punches) {

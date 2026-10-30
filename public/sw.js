@@ -1,12 +1,17 @@
 /* Job Snap service worker — caches app shell only, never IndexedDB user data. */
-const CACHE_NAME = "job-snap-shell-v2";
+const CACHE_NAME = "job-snap-shell-v3";
 // On a weak signal, don't wait forever for the network before showing the
 // cached screen (the fetch keeps going and refreshes the cache).
 const NAVIGATION_TIMEOUT_MS = 4000;
 const PRECACHE_URLS = [
   "/",
+  "/contacts",
+  "/jobs",
+  "/time",
+  "/more",
   "/notes",
   "/export",
+  "/settings",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/apple-touch-icon.png",

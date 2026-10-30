@@ -1,5 +1,6 @@
 import { format } from "date-fns";
-import type { Contact, DayNote, Job, Photo, Punch } from "./types";
+import type { Contact, DayNote, Job, Photo, PhotoCategory, Punch } from "./types";
+import { getSettings, saveSettings, sanitizeSettings, type AppSettings } from "./settings";
 import {
   buildZipBlob,
   downloadBlob,
@@ -27,6 +28,8 @@ export type BackupPhotoMeta = {
   createdAt: string;
   mimeType: string;
   filename: string;
+  /** Added later; missing in older backups (restored as Other). */
+  category?: PhotoCategory;
 };
 
 export type BackupPayload = {
@@ -38,6 +41,8 @@ export type BackupPayload = {
   punches: Punch[];
   dayNotes: DayNote[];
   photos: BackupPhotoMeta[];
+  /** Added later (invoice rounding); missing in older backups. */
+  settings?: AppSettings;
 };
 
 function extensionForBlob(blob: Blob) {
@@ -127,6 +132,7 @@ export async function buildFullBackupZip(): Promise<{
       createdAt: photo.createdAt,
       mimeType: photo.blob.type || "image/jpeg",
       filename: `photos/${photo.id}.${ext}`,
+      category: photo.category ?? "other",
     };
   });
 
@@ -139,6 +145,7 @@ export async function buildFullBackupZip(): Promise<{
     punches,
     dayNotes,
     photos: photoMeta,
+    settings: getSettings(),
   };
 
   const files: { name: string; data: Uint8Array | Blob | string }[] = [
@@ -339,6 +346,7 @@ export async function restoreFullBackup(zipBlob: Blob) {
       blob,
       caption: meta.caption ?? "",
       createdAt: meta.createdAt,
+      ...(meta.category ? { category: meta.category } : {}),
     });
   }
 
@@ -349,6 +357,14 @@ export async function restoreFullBackup(zipBlob: Blob) {
     dayNotes: payload.dayNotes,
     photos,
   });
+
+  if (payload.settings) {
+    try {
+      saveSettings(sanitizeSettings(payload.settings));
+    } catch {
+      /* settings are a convenience; data restore already succeeded */
+    }
+  }
 
   // Deliberately not marking a backup here: the restored data hasn't been
   // backed up from this device yet, so the reminder should stay accurate.

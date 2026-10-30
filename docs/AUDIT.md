@@ -169,3 +169,35 @@ Every defect below was re-tested after the fix. `e2e/reliability.spec.ts` has a 
 **Data compatibility:** no stored record format changed and no data migration runs. Existing contacts, jobs, punches, photos, notes and backups load as before. Older backups restore unchanged, and backups made now restore on the previous version.
 
 **Still needs a real device:** D9 and D10 on iPhone Safari and the home-screen app; whether iOS honours `persist()` (it may only for the home-screen app); and the save-on-close behaviour when swiping the app away on iOS.
+
+---
+
+## 9. Phase 3 status (workflow)
+
+Agreed decisions: existing **open → In Progress** and **closed → Completed**; **exact time by default, with optional rounding for invoices only**.
+
+### Data model (all additions optional; no migration)
+- **Five statuses**: Scheduled, In Progress, On Hold, Completed, Paid. Legacy `open`/`closed` values are *translated when read* (`normalizeStatus`) and stay stored exactly as they are until someone changes that job's status. A test checks that browsing every screen leaves legacy records byte-identical.
+- **Job fields**: job address (blank = the customer's address), scheduled date, description, important instructions, and `history` (status changes, renames, detail edits, manual/edited/deleted time entries, dated notes). History is written in the same transaction as the change.
+- **Time entries**: `source` ("clock" | "manual") and an optional `note`. Manual entries and edits are refused if they overlap another entry (on any job) or end in the future. Clocking in moves a job to In Progress, and that change is logged.
+- **Photos**: `category` (Before / During / After / Other). Older photos show as Other. Originals are still stored unmodified.
+- **Settings** (per device, included in backups): invoice rounding (off / 5 / 6 / 10 / 15 / 30 min, nearest or up, per entry) and week start (Sunday / Monday).
+- **Backups**: carry photo categories and settings. Older backups restore unchanged, and restore keeps every status value.
+
+### Screens
+- **Navigation**: Home · Contacts · Jobs · Time · More (Notes, Reports & exports, Backup & restore, Settings), with the active tab highlighted. Wording standardised on "clock in/out" and "time entry".
+- **Home (dashboard)**: today's hours and the week's total; clock status with the active job, elapsed time and Clock out; quick actions (Add job, Add contact, Import contacts, Add note, Add photo, Clock in/out); recent jobs with Clock in / Switch (replaces "Continue"); counts per status linking to the filtered Jobs list; and first-run steps when the app is empty.
+- **Jobs**: search, status filter chips (default "Not finished"), an inline status picker, hours logged, photo count, scheduled date and last activity.
+- **Job workspace**: header with a status picker; important instructions banner; clock card with today / week / all-time totals; sections **Overview** (customer, tap-to-call, job address and directions, schedule, description, edit, delete), **Time** (entries with clock/manual tag, edit, delete, add time), **Photos** (category picker, filter chips, category in the viewer), **Notes** (job notes, dated notes, today's general note) and **History** (timeline). The section is kept in the URL (`?tab=`).
+- **Time**: week-by-week timecard with week and today totals, per-job totals, and per-day entries; add time manually; download the week as CSV (replaces Home's "This week CSV").
+- **Contacts**: moved to `/contacts`. Search also matches phone digits regardless of formatting. Import now goes through a **review step**: new contacts are ticked, exact duplicates are skipped, and possible duplicates (same name, phone or email) are listed *unticked* next to the matching contact; nothing is merged. Import shows progress and a result, and has iPhone .vcf export instructions. The contact page adds Call and Email buttons, status pickers per job, and the shared New job dialog.
+- **Notes**: search across day notes and job notes; a Job notes list linking to each job's Notes section.
+- **Exports**: the CSV gains **Entry Type** and **Entry Note** columns *at the end* (earlier columns unchanged), a job status column in the Job notes section, and a photo category column. The photo ZIP is organised as `photos/<Customer>/<Job>/date_Category_caption_nn.ext`. Invoice amounts equal *hours shown × rate*; with rounding on, the PDF states the rule and the exact recorded hours.
+
+### Tests
+`e2e/smoke.spec.ts` is now the handoff's **required 15-step scenario**. Restore runs in a *separate browser profile*, and the test then confirms the original profile's records are unchanged. `e2e/reliability.spec.ts` adds two tests: legacy status mapping with no rewrites, and invoice rounding with recorded times preserved. **12 of 12 tests pass on 5 consecutive runs.**
+
+### Still open
+- Real-device checks (iPhone Safari and the home-screen app, desktop Safari), including the D9/D10 items from Phase 2.
+- Lint: 4 errors remain, all the older set-state-in-effect pattern (contact page, Export, install prompt).
+- Phase 4 visual refinement (type scale and spacing tokens, replacing remaining `alert()`s with inline messages and toasts).

@@ -96,9 +96,11 @@ test("short punches add up exactly instead of truncating to zero", async ({
       punchedOutAt: new Date(base + i * 3_600_000 + 59_000).toISOString(),
     })),
   });
-  await page.goto("/jobs/jA");
-  await expect(page.getByText("Total hours")).toContainText("0.16");
-  await expect(page.getByText(/Closed total/)).toHaveText("Closed total 10m");
+  await page.goto("/jobs/jA?tab=time");
+  await expect(page.locator("main dl").first()).toContainText("All time0.16 h");
+  await expect(page.getByText(/Completed entries:/)).toHaveText(
+    "Completed entries: 10m (0.16 h)",
+  );
 });
 
 test("saving a punch without changes keeps its original seconds", async ({
@@ -116,10 +118,10 @@ test("saving a punch without changes keeps its original seconds", async ({
       },
     ],
   });
-  await page.goto("/jobs/jA");
-  await page.getByRole("button", { name: "Edit punch" }).click();
+  await page.goto("/jobs/jA?tab=time");
+  await page.getByRole("button", { name: "Edit entry" }).click();
   await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("heading", { name: "Edit punch" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Edit time entry" })).toBeHidden();
   const [px] = await readPunches(page);
   expect(px.punchedInAt).toBe("2026-10-02T08:00:12.000Z");
   expect(px.punchedOutAt).toBe("2026-10-02T09:00:45.000Z");
@@ -128,7 +130,7 @@ test("saving a punch without changes keeps its original seconds", async ({
 test("simultaneous punch-ins never leave two timers running", async ({
   page,
 }) => {
-  // Closed punches make both jobs show on Home with their own Punch in button.
+  // Closed punches make both jobs show on Home with their own Clock in button.
   await resetAndSeed(page, {
     contacts: [contact],
     jobs: [job("jA", "Job A"), job("jB", "Job B")],
@@ -139,13 +141,13 @@ test("simultaneous punch-ins never leave two timers running", async ({
   });
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: "Punch in", exact: true }),
+    page.getByRole("button", { name: /^Clock in to Job/ }),
   ).toHaveCount(2);
   // Click both in the same tick, as two tabs (or a double tap) racing would.
   await page.evaluate(() => {
-    const buttons = [...document.querySelectorAll("button")].filter(
-      (el) => el.textContent?.trim() === "Punch in",
-    );
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Clock in to Job"]'),
+    ];
     buttons.forEach((el) => el.click());
   });
   await expect
@@ -172,7 +174,7 @@ test("an existing pair of open punches is flagged for the user", async ({
 });
 
 for (const field of [
-  { label: "job notes", placeholder: /Materials, access codes/ },
+  { label: "job notes", placeholder: /Materials, measurements/ },
   { label: "today's note", placeholder: /Quick day note/ },
 ]) {
   test(`${field.label} survive closing the app without leaving the field`, async ({
@@ -182,7 +184,7 @@ for (const field of [
       contacts: [contact],
       jobs: [job("jA", "Notes job")],
     });
-    await page.goto("/jobs/jA");
+    await page.goto("/jobs/jA?tab=notes");
     // Only this field is touched, so it never loses focus before the reload
     // (like locking the iPhone or swiping the app away).
     await page.getByPlaceholder(field.placeholder).fill("Gate code 4411");
@@ -205,7 +207,7 @@ test("a storage failure shows an error with retry, never an empty app", async ({
   });
   const page = await context.newPage();
   await page.goto("/");
-  await expect(page.getByText("Couldn't load your contacts.")).toBeVisible();
+  await expect(page.getByText("Couldn't load your data.")).toBeVisible();
   await expect(page.getByText("No contacts yet")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
 
@@ -259,6 +261,8 @@ test("full backup and restore reproduce photos, captions, and exact times", asyn
   );
 
   await page.goto("/export");
+  // Wait until the page is interactive (Restore is disabled until then).
+  await expect(page.getByRole("button", { name: "Download backup" })).toBeEnabled();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download backup" }).click();
   const backupPath = testInfo.outputPath("backup.zip");
@@ -268,9 +272,15 @@ test("full backup and restore reproduce photos, captions, and exact times", asyn
   // Wipe everything, then restore from the file.
   await resetAndSeed(page, {});
   await page.goto("/export");
+  // Wait until the page is interactive (Restore is disabled until then).
+  await expect(page.getByRole("button", { name: "Download backup" })).toBeEnabled();
   await page.locator('#full-backup input[type="file"]').setInputFiles(backupPath);
   await page.getByRole("button", { name: "Replace all local data" }).click();
-  await page.waitForURL(/\/export/);
+  // The dialog closes only after the restore has committed.
+  await expect(page.getByRole("heading", { name: "Restore full backup?" })).toBeHidden({
+    timeout: 30_000,
+  });
+  await page.waitForLoadState("load");
   await expect(page.getByRole("heading", { name: "Export" })).toBeVisible();
 
   const restored = await page.evaluate(
@@ -306,4 +316,106 @@ test("full backup and restore reproduce photos, captions, and exact times", asyn
     punchedInAt: "2026-10-04T08:00:07.000Z",
     punchedOutAt: "2026-10-04T12:34:56.000Z",
   });
+});
+
+test("jobs saved as open/closed show as In Progress/Completed and stay unchanged until edited", async ({
+  page,
+}) => {
+  await resetAndSeed(page, {
+    contacts: [contact],
+    jobs: [
+      { ...job("jOpen", "Legacy open"), status: "open" },
+      { ...job("jClosed", "Legacy closed"), status: "closed" },
+    ],
+  });
+  const stored = () =>
+    page.evaluate(
+      () =>
+        new Promise<Record<string, unknown>[]>((resolve) => {
+          const req = indexedDB.open("sitefold");
+          req.onsuccess = () => {
+            const get = req.result.transaction("jobs").objectStore("jobs").getAll();
+            get.onsuccess = () => {
+              resolve(get.result);
+              req.result.close();
+            };
+          };
+        }),
+    );
+  const before = await stored();
+
+  await page.goto("/jobs?status=all");
+  const rows = page.locator("main li");
+  await expect(rows.filter({ hasText: "Legacy open" }).locator("select")).toHaveValue(
+    "in_progress",
+  );
+  await expect(rows.filter({ hasText: "Legacy closed" }).locator("select")).toHaveValue(
+    "completed",
+  );
+  await page.goto("/jobs/jOpen?tab=notes");
+  await page.goto("/");
+  // Viewing does not rewrite anything.
+  expect(await stored()).toEqual(before);
+
+  // Changing the status stores the new value and logs it.
+  await page.goto("/jobs/jClosed");
+  await page.locator('main select[aria-label="Job status"]').selectOption("paid");
+  await expect(page.locator('main select[aria-label="Job status"]')).toHaveValue("paid");
+  const after = await stored();
+  const closed = after.find((j) => j.id === "jClosed") as {
+    status: string;
+    history: { text: string }[];
+  };
+  expect(closed.status).toBe("paid");
+  expect(closed.history.map((h) => h.text)).toContain("Status: Completed → Paid");
+  expect(after.find((j) => j.id === "jOpen")).toEqual(
+    before.find((j) => j.id === "jOpen"),
+  );
+});
+
+test("invoice rounding applies only to the invoice and keeps recorded time", async ({
+  page,
+}) => {
+  const base = Date.parse("2026-10-05T08:00:00.000Z");
+  await resetAndSeed(page, {
+    contacts: [{ ...contact, hourlyRate: 100 }],
+    jobs: [job("jA", "Rounded job")],
+    punches: [
+      // 52 minutes and 7 minutes
+      { id: "r1", jobId: "jA", punchedInAt: new Date(base).toISOString(), punchedOutAt: new Date(base + 52 * 60_000).toISOString() },
+      { id: "r2", jobId: "jA", punchedInAt: new Date(base + 3_600_000).toISOString(), punchedOutAt: new Date(base + 3_600_000 + 7 * 60_000).toISOString() },
+    ],
+  });
+  await page.goto("/settings");
+  await page.locator("#rounding-minutes").selectOption("15");
+  await expect(page.getByText(/a 52m entry is billed as 45m/)).toBeVisible();
+  await page.locator("#rounding-mode").selectOption("up");
+  await expect(page.getByText(/a 52m entry is billed as 1h/)).toBeVisible();
+
+  await page.goto("/export");
+  // Wait until the page is interactive (Restore is disabled until then).
+  await expect(page.getByRole("button", { name: "Download backup" })).toBeEnabled();
+  await page.locator("#export-contact").selectOption({ label: "Reliability Customer" });
+  await page.locator("#from").fill("2026-10-01");
+  await page.locator("#to").fill("2026-10-31");
+  await expect(page.getByText(/Rounded up 15 min per entry/)).toBeVisible();
+  // On-screen totals stay exact: 59 minutes = 0.98 h.
+  await expect(page.locator("main").getByText("0.98 hrs").first()).toBeVisible();
+
+  const [pdf] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Download invoice PDF" }).click(),
+  ]);
+  const bytes = await (await pdf.createReadStream())!.toArray();
+  const text = Buffer.concat(bytes).toString("latin1");
+  // 52m → 60m, 7m → 15m: 1.25 h billed at $100/h; recorded 0.98 h noted.
+  expect(text).toContain("1.25");
+  expect(text).toContain("$125.00");
+  expect(text).toContain("Recorded time: 0.98 h");
+
+  // Recorded entries are untouched.
+  const punches = await readPunches(page);
+  expect(punches.find((p) => p.id === "r1")!.punchedOutAt).toBe(
+    new Date(base + 52 * 60_000).toISOString(),
+  );
 });

@@ -39,6 +39,8 @@ import {
 } from "@/lib/backup";
 import { formatDay, hoursFromMinutes, todayKey } from "@/lib/time";
 import { buildInvoiceData, downloadInvoicePdf } from "@/lib/invoice";
+import { describeRounding, useSettings } from "@/lib/settings";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,6 +85,7 @@ function ExportPhotoThumb({ item }: { item: PhotoExportItem }) {
 }
 
 export default function ExportPage() {
+  const settings = useSettings();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [contactId, setContactId] = useState("");
@@ -296,6 +299,7 @@ export default function ExportPage() {
         rows,
         from,
         to,
+        rounding: settings,
       });
       await downloadInvoicePdf(data);
     } catch (e) {
@@ -381,7 +385,8 @@ export default function ExportPage() {
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Download or print your time clock with daily notes, job notes, and
-          site photos. Filter by client for invoice PDF and ZIP packages.
+          site photos. Filter by client for invoice PDF and ZIP packages. To
+          save <em>everything</em> for safekeeping, use Full backup below.
         </p>
       </div>
 
@@ -512,17 +517,21 @@ export default function ExportPage() {
             {selectedContact.hourlyRate != null
               ? ` at $${selectedContact.hourlyRate}/hr`
               : " (hours only — set a rate on the contact to bill)"}
-            . Closed punches only.
+            . Closed entries only. {describeRounding(settings)} —{" "}
+            <Link href="/settings" className="underline underline-offset-2">
+              change
+            </Link>
+            .
           </p>
         ) : null}
         {photoItems.length > 0 ? (
           <p className="text-xs text-muted-foreground">
             ZIP includes the CSV plus {photoItems.length} photo
-            {photoItems.length === 1 ? "" : "s"} named by job and date.
+            {photoItems.length === 1 ? "" : "s"} in customer / job folders.
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            ZIP packages the CSV with any photos on jobs punched in this range.
+            ZIP packages the CSV with photos from jobs with time in this range.
           </p>
         )}
       </section>
@@ -711,7 +720,7 @@ export default function ExportPage() {
             role="status"
             className="rounded-xl bg-[oklch(0.94_0.04_85)] px-3 py-2 text-sm text-[oklch(0.35_0.05_75)] ring-1 ring-[oklch(0.75_0.08_75_/0.35)]"
           >
-            {openCount} open punch{openCount === 1 ? "" : "es"} listed as Still
+            {openCount} running entr{openCount === 1 ? "y" : "ies"} listed as Still
             open — excluded from billed hours.
           </p>
         ) : null}
@@ -783,7 +792,7 @@ export default function ExportPage() {
                 <header className="mb-3 border-b border-[oklch(0.35_0.03_155_/0.1)] pb-2">
                   <h3 className="font-heading font-semibold">Job notes</h3>
                   <p className="text-xs text-muted-foreground">
-                    Notes on jobs punched in this range
+                    Notes on jobs with time in this range
                   </p>
                 </header>
                 <ul className="space-y-3">

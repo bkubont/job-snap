@@ -16,7 +16,7 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Job Snap — contacts, jobs, time clock",
   description:
-    "Turn phone contacts into job folders. Punch in and out, take photos, write daily notes, and export your time clock.",
+    "Customers, jobs, time clock, photos and notes for field work — export timecards and back up everything.",
   applicationName: "Job Snap",
   manifest: "/manifest.webmanifest",
   appleWebApp: {

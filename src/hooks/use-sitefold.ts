@@ -147,6 +147,42 @@ export function useActivePunch() {
   };
 }
 
+/** Every job with customer, totals, photo count and last activity. */
+export function useJobOverviews() {
+  const q = useDbQuery("job-overviews", db.listJobOverviews);
+  return {
+    overviews: q.data ?? [],
+    loading: q.loading,
+    error: q.error,
+    retry: q.retry,
+  };
+}
+
+/** All punches, jobs and contacts (Time page, dashboard totals). */
+export function useTimeData() {
+  const q = useDbQuery("time-data", () =>
+    Promise.all([db.listAllPunches(), db.listAllJobs(), db.listContacts()]),
+  );
+  return {
+    punches: q.data?.[0] ?? [],
+    jobs: q.data?.[1] ?? [],
+    contacts: q.data?.[2] ?? [],
+    loading: q.loading,
+    error: q.error,
+    retry: q.retry,
+  };
+}
+
+/** Re-render every `ms` while `enabled` (live timers). */
+export function useTicker(enabled: boolean, ms = 1000) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const t = window.setInterval(() => setTick((n) => n + 1), ms);
+    return () => window.clearInterval(t);
+  }, [enabled, ms]);
+}
+
 export function useRecentJobs(limit = 5) {
   const q = useDbQuery(`recent:${limit}`, () => db.listRecentJobs(limit));
   return { recent: q.data ?? [], error: q.error, refresh: bump };

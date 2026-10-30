@@ -15,14 +15,15 @@ Open [http://localhost:3456](http://localhost:3456).
 
 ## Features
 
-- **Contacts** — Contact Picker API (Chrome/Edge on Android), **vCard (`.vcf`) import**, or manual add. Search, edit name/phone/email/address, optional **hourly rate**, and **Get directions** from a stored address.
-- **Jobs per contact** — open/close jobs; rename titles on the job page; punch history and photos live on the job.
-- **Punch clock** — one open punch at a time; Continue on home; Switch / Reopen on job pages; sticky bar to punch out; edit or delete punches.
-- **Photos** — camera or library; optional captions; tap for full-screen lightbox; stored with the job and included in export.
-- **Day notes** — notebook for the day (Notes tab + Today’s note on the job); included in exports.
-- **Export (timecard)** — filter by contact and/or job; CSV, **ZIP + photos**, Print/PDF, or (with a contact selected) **Download invoice PDF**. Invoice groups closed punches by job × rate; contacts without a rate get a hours-only statement. Open punches list as “Still open” and are **excluded from billed hour totals**.
-- **Full backup** — separate from the timecard ZIP. Downloads every contact, job, punch, day note, and photo blob; restore replaces all local data. Use the Job Snap download as-is (STORE ZIP).
-- **PWA** — installable; service worker caches the shell for offline use of home, notes, and export.
+- **Home dashboard** — today's and this week's hours, clock status, quick actions, recent jobs, jobs by status.
+- **Contacts** — vCard (`.vcf`) / CSV import with a review step (new, exact duplicates skipped, possible duplicates for you to decide — never auto-merged), Contact Picker on Android, manual add, search, edit, hourly rate, call / email / directions.
+- **Jobs** — many per customer; statuses Scheduled · In Progress · On Hold · Completed · Paid (changeable inline); job address, scheduled date, description, important instructions; history of changes.
+- **Time** — clock in/out (one timer at a time, enforced across tabs), switch jobs, manual entries for missed punches (no overlaps), edit/delete with history, daily / weekly / per-job totals.
+- **Photos** — camera or library, Before / During / After / Other, captions, full-screen viewer; originals kept as-is.
+- **Notes** — day notes, job notes, dated job notes; searchable.
+- **Export** — timecard CSV (filter by dates, customer, job), print / PDF, ZIP with photos in customer/job folders, invoice PDF (optional per-entry rounding for invoices only — recorded time is never changed).
+- **Full backup / restore** — everything on the device, including settings.
+- **PWA** — installable; works offline after first visit.
 
 ## Timecard ZIP vs Full backup
 

@@ -8,7 +8,11 @@ import { punchOut } from "@/lib/db";
 import { refreshSitefold } from "@/hooks/use-sitefold";
 import { Button } from "@/components/ui/button";
 
-export function ActivePunchBar() {
+/**
+ * Global running-timer bar. `compact` (used on the dashboard, which shows the
+ * timer itself) hides the timer row but keeps any multiple-timer warning.
+ */
+export function ActivePunchBar({ compact = false }: { compact?: boolean }) {
   const { active, openPunches } = useActivePunch();
   const extras = openPunches.filter((p) => p.punch.id !== active?.punch.id);
   const [, setTick] = useState(0);
@@ -21,6 +25,7 @@ export function ActivePunchBar() {
   }, [active]);
 
   if (!active) return null;
+  if (compact && extras.length === 0) return null;
 
   async function onPunchOut() {
     setBusy(true);
@@ -28,7 +33,7 @@ export function ActivePunchBar() {
       await punchOut(active!.punch.id);
       refreshSitefold();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not punch out");
+      alert(e instanceof Error ? e.message : "Could not clock out");
     } finally {
       setBusy(false);
     }
@@ -36,6 +41,7 @@ export function ActivePunchBar() {
 
   return (
     <div className="border-t border-[oklch(0.55_0.12_75_/0.25)] bg-[oklch(0.42_0.08_155)] px-4 py-2.5 text-[oklch(0.97_0.02_95)]">
+      {compact ? null : (
       <div className="mx-auto flex max-w-lg items-center gap-3">
         <span className="relative flex h-2.5 w-2.5 shrink-0">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[oklch(0.82_0.14_75)] opacity-75" />
@@ -59,9 +65,10 @@ export function ActivePunchBar() {
           onClick={onPunchOut}
           className="shrink-0 bg-[oklch(0.92_0.04_85)] text-[oklch(0.28_0.04_155)] hover:bg-white"
         >
-          Punch out
+          Clock out
         </Button>
       </div>
+      )}
       {extras.length > 0 ? (
         <div
           role="alert"

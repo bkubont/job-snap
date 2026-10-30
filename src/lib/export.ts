@@ -6,7 +6,8 @@ import {
   endOfDay,
   subDays,
 } from "date-fns";
-import type { Contact, DayNote, Job, Photo, Punch } from "./types";
+import type { Contact, DayNote, Job, Photo, PhotoCategory, Punch } from "./types";
+import { PHOTO_CATEGORY_LABEL, STATUS_LABEL } from "./status";
 import { durationMinutes, formatDateTime, hoursFromMinutes, todayKey } from "./time";
 
 export type ExportFilters = {
@@ -29,12 +30,16 @@ export type ExportRow = {
   minutes: number;
   dayNote: string;
   isOpen: boolean;
+  /** "Clock" (punched live) or "Manual" (entered afterwards). */
+  entryType: "Clock" | "Manual";
+  entryNote: string;
 };
 
 export type JobNoteRow = {
   jobId: string;
   contact: string;
   job: string;
+  status: string;
   notes: string;
 };
 
@@ -45,6 +50,7 @@ export type PhotoExportItem = {
   job: string;
   date: string;
   caption: string;
+  category: PhotoCategory;
   /** Relative path inside the ZIP package */
   filename: string;
 };
@@ -152,6 +158,8 @@ export function buildExportRows(args: {
         minutes,
         dayNote: noteMap.get(date) ?? "",
         isOpen,
+        entryType: p.source === "manual" ? "Manual" : "Clock",
+        entryNote: p.note ?? "",
       };
     });
 }
@@ -192,6 +200,7 @@ export function buildJobNoteRows(args: {
         jobId: job.id,
         contact: contact?.name ?? "Unknown",
         job: job.title,
+        status: STATUS_LABEL[job.status] ?? "",
         notes: job.notes.trim(),
       };
     })
@@ -243,13 +252,16 @@ export function buildPhotoExportItems(args: {
     const contactName = contact?.name ?? "Unknown";
     const jobTitle = job?.title ?? "Unknown job";
     const date = format(parseISO(photo.createdAt), "yyyy-MM-dd");
+    const category = photo.category ?? "other";
     const key = `${photo.jobId}:${date}`;
     const n = (counters.get(key) ?? 0) + 1;
     counters.set(key, n);
     const captionPart = photo.caption.trim()
       ? `_${sanitizeFilenamePart(photo.caption)}`
       : "";
-    const filename = `photos/${date}_${sanitizeFilenamePart(contactName)}_${sanitizeFilenamePart(jobTitle)}${captionPart}_${String(n).padStart(2, "0")}.${extensionForBlob(photo.blob)}`;
+    // Customer / Job folders; job id suffix keeps two same-named jobs apart.
+    const folder = `photos/${sanitizeFilenamePart(contactName)}/${sanitizeFilenamePart(jobTitle)}-${photo.jobId.slice(0, 4)}`;
+    const filename = `${folder}/${date}_${PHOTO_CATEGORY_LABEL[category]}${captionPart}_${String(n).padStart(2, "0")}.${extensionForBlob(photo.blob)}`;
     return {
       photo,
       jobId: photo.jobId,
@@ -257,6 +269,7 @@ export function buildPhotoExportItems(args: {
       job: jobTitle,
       date,
       caption: photo.caption.trim(),
+      category,
       filename,
     };
   });
@@ -296,7 +309,7 @@ export function rowsToCsv(
   }
   lines.push("");
   lines.push(
-    "Date,Contact,Phone,Email,Address,Job,Punch In,Punch Out,Hours,Day Note",
+    "Date,Contact,Phone,Email,Address,Job,Punch In,Punch Out,Hours,Day Note,Entry Type,Entry Note",
   );
   for (const row of rows) {
     lines.push(
@@ -311,6 +324,8 @@ export function rowsToCsv(
         row.punchedOut,
         row.hours,
         row.dayNote,
+        row.entryType,
+        row.entryNote,
       ]
         .map(csvEscape)
         .join(","),
@@ -328,22 +343,23 @@ export function rowsToCsv(
 
   lines.push("");
   lines.push("Job notes");
-  lines.push("Contact,Job,Notes");
+  lines.push("Contact,Job,Status,Notes");
   for (const note of jobNotes) {
     lines.push(
-      [note.contact, note.job, note.notes].map(csvEscape).join(","),
+      [note.contact, note.job, note.status, note.notes].map(csvEscape).join(","),
     );
   }
 
   lines.push("");
   lines.push("Photos");
-  lines.push("Date,Contact,Job,Caption,Filename");
+  lines.push("Date,Contact,Job,Category,Caption,Filename");
   for (const item of photos) {
     lines.push(
       [
         item.date,
         item.contact,
         item.job,
+        PHOTO_CATEGORY_LABEL[item.category],
         item.caption,
         item.filename,
       ]
@@ -388,16 +404,18 @@ export function downloadBlob(filename: string, blob: Blob) {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** Last 7 days (same range as Export “Last 7 days”), then trigger CSV download. */
-export async function downloadThisWeekCsv(load: {
-  punches: Punch[];
-  jobs: Job[];
-  contacts: Contact[];
-  dayNotes: DayNote[];
-  photos?: Photo[];
-}) {
-  const to = todayKey();
-  const from = format(subDays(new Date(), 6), "yyyy-MM-dd");
+/** Build and download the timecard CSV for a date range (all customers). */
+export async function downloadRangeCsv(
+  load: {
+    punches: Punch[];
+    jobs: Job[];
+    contacts: Contact[];
+    dayNotes: DayNote[];
+    photos?: Photo[];
+  },
+  from: string,
+  to: string,
+) {
   const photos = load.photos ?? [];
   const rows = buildExportRows({ ...load, from, to });
   const jobNotes = buildJobNoteRows({ ...load, from, to });
@@ -409,6 +427,21 @@ export async function downloadThisWeekCsv(load: {
     "text/csv;charset=utf-8",
   );
   return { from, to, rowCount: rows.length };
+}
+
+/** Last 7 days (same range as Export “Last 7 days”), then trigger CSV download. */
+export async function downloadThisWeekCsv(load: {
+  punches: Punch[];
+  jobs: Job[];
+  contacts: Contact[];
+  dayNotes: DayNote[];
+  photos?: Photo[];
+}) {
+  return downloadRangeCsv(
+    load,
+    format(subDays(new Date(), 6), "yyyy-MM-dd"),
+    todayKey(),
+  );
 }
 
 export function summarizeByDay(rows: ExportRow[]) {
